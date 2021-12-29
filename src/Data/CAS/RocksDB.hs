@@ -53,6 +53,7 @@ module Data.CAS.RocksDB
 , Codec(..)
 , RocksDbTable
 , newTable
+, unregisteredNewTable
 , tablesTable
 , tableLookup
 , tableInsert
@@ -106,6 +107,7 @@ module Data.CAS.RocksDB
 ) where
 
 import Control.Lens
+import Control.Exception (evaluate)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
@@ -316,25 +318,37 @@ newTable
     -> Codec k
     -> [B.ByteString]
     -> IO (RocksDbTable k v)
-newTable db valCodec keyCodec namespace
+newTable db valCodec keyCodec namespace = do
+  table <- evaluate (unregisteredNewTable db valCodec keyCodec namespace)
+  tableInsert (tablesTable db) namespace ()
+  return table
+
+-- | Create a new 'RocksDbTable' in the given 'RocksDb' without registering it with the "tables" table.
+--
+unregisteredNewTable 
+    :: HasCallStack 
+    => RocksDb
+    -> Codec v
+    -> Codec k
+    -> [B.ByteString]
+    -> RocksDbTable k v
+unregisteredNewTable db valCodec keyCodec namespace
     | any (B8.any (\x -> x `elem` ['$', '%', '/'])) namespace
         = error $ "Data.CAS.RocksDb.newTable: invalid character in table namespace: " <> sshow namespace
     | otherwise
-        = do 
-            tableInsert (tablesTable db) namespace ()
-            return $ RocksDbTable valCodec keyCodec ns (_rocksDbHandle db)
+        = RocksDbTable valCodec keyCodec ns (_rocksDbHandle db)
   where
     ns = _rocksDbNamespace db <> "-" <> B.intercalate "/" namespace <> "$"
-{-# INLINE newTable #-}
+{-# INLINE unregisteredNewTable #-}
 
 tablesTable
     :: RocksDb
     -> RocksDbTable [B.ByteString] ()
-tablesTable db = RocksDbTable 
+tablesTable db = unregisteredNewTable 
+    db
     (Codec (\() -> "") (\_ -> pure ())) 
     (Codec (B.intercalate "/") (pure . B8.split '/'))
-    (_rocksDbNamespace db <> "-" <> "chainweb_tables" <> "$")
-    (_rocksDbHandle db)
+    ["ChainwebTables"]
 
 -- | @tableInsert db k v@ inserts the value @v@ at key @k@ in the rocks db table
 -- @db@.
