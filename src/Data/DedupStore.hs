@@ -123,12 +123,15 @@ newDedupStore
     -> Codec v
     -> Codec k
     -> [B.ByteString]
-    -> DedupStore k v
-newDedupStore rdb vc kc n = DedupStore
-    { _dedupRoots = newTable rdb dedupHashCodec kc (n <> ["roots"])
-    , _dedupChunks = newCas rdb dedupChunkCodec dedupHashCodec (n <> ["chunks"])
-    , _dedupValueCodec = vc
-    }
+    -> IO (DedupStore k v)
+newDedupStore rdb vc kc n = do 
+    roots <- newTable rdb dedupHashCodec kc (n <> ["roots"])
+    chunks <- newCas rdb dedupChunkCodec dedupHashCodec (n <> ["chunks"])
+    pure DedupStore
+        { _dedupRoots = roots
+        , _dedupChunks = chunks
+        , _dedupValueCodec = vc
+        }
   where
     dedupHashCodec = Codec
         { _codecEncode = _dedupHashBytes

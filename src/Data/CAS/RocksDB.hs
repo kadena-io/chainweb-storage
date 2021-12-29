@@ -314,15 +314,26 @@ newTable
     -> Codec v
     -> Codec k
     -> [B.ByteString]
-    -> RocksDbTable k v
+    -> IO (RocksDbTable k v)
 newTable db valCodec keyCodec namespace
     | any (B8.any (\x -> x `elem` ['$', '%', '/'])) namespace
         = error $ "Data.CAS.RocksDb.newTable: invalid character in table namespace: " <> sshow namespace
     | otherwise
-        = RocksDbTable valCodec keyCodec ns (_rocksDbHandle db)
+        = do 
+            tableInsert (tablesTable db) namespace ()
+            return $ RocksDbTable valCodec keyCodec ns (_rocksDbHandle db)
   where
     ns = _rocksDbNamespace db <> "-" <> B.intercalate "/" namespace <> "$"
 {-# INLINE newTable #-}
+
+tablesTable
+    :: RocksDb
+    -> RocksDbTable [B.ByteString] ()
+tablesTable db = RocksDbTable 
+    (Codec (\() -> "") (\_ -> pure ())) 
+    (Codec (B.intercalate "/") (pure . B8.split '/'))
+    (_rocksDbNamespace db <> "-" <> "chainweb_tables" <> "$")
+    (_rocksDbHandle db)
 
 -- | @tableInsert db k v@ inserts the value @v@ at key @k@ in the rocks db table
 -- @db@.
@@ -685,8 +696,8 @@ newCas
     -> Codec v
     -> Codec k
     -> [B.ByteString]
-    -> RocksDbCas v
-newCas db vc kc n = RocksDbCas $ newTable db vc kc n
+    -> IO (RocksDbCas v)
+newCas db vc kc n = RocksDbCas <$> newTable db vc kc n
 {-# INLINE newCas #-}
 
 -- -------------------------------------------------------------------------- --
