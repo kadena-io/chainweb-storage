@@ -53,6 +53,7 @@ module Data.CAS.RocksDB
 , Codec(..)
 , RocksDbTable
 , newTable
+, tablesTable
 , tableLookup
 , tableInsert
 , tableDelete
