@@ -322,6 +322,7 @@ newTable db valCodec keyCodec namespace = do
     table <- evaluate (unregisteredNewTable db valCodec keyCodec namespace)
     tableInsert (tablesTable db) namespace ()
     return table
+{-# INLINE newTable #-}
 
 -- | Create a new 'RocksDbTable' in the given 'RocksDb' without registering it with the "tables" table.
 --
