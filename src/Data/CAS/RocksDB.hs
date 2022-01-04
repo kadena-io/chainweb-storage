@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveFunctor #-}
@@ -37,6 +38,9 @@
 --
 -- TODO: Abstract the 'RocksDbTable' API into a typeclass so that one can
 -- provide alterantive implementations for it.
+
+-- This module contains some code modified from github.com/serokell/rocksdb-haskell, 
+-- copyright the rocksdb-haskell and leveldb-haskell authors.
 --
 module Data.CAS.RocksDB
 ( RocksDb(..)
@@ -102,6 +106,7 @@ module Data.CAS.RocksDB
 -- * RocksDB-specific tools
 , checkpointRocksDb
 , approxTableSizeRocksDb
+, deleteRange
 ) where
 
 import Control.Lens
@@ -113,6 +118,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as B8
 
 import Data.CAS
+import Data.Maybe
 import Data.String
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -128,12 +134,15 @@ import qualified Database.RocksDB.Internal as R
 import qualified Database.RocksDB.Iterator as I
 
 import GHC.Generics (Generic)
+import qualified GHC.Foreign as GHC
+import qualified GHC.IO.Encoding as GHC
 import GHC.Stack
 
 import NoThunks.Class
 
 import qualified Streaming.Prelude as S
 
+import System.Directory
 import System.IO.Temp
 
 -- -------------------------------------------------------------------------- --
@@ -170,12 +179,19 @@ sshow = fromString . show
 -- -------------------------------------------------------------------------- --
 -- RocksDb
 
+data ColumnFamilyHandle
+
+data RocksDbHandle = RocksDbHandle
+    { _rocksDbHandleUnderlying :: !R.DB
+    , _rocksDbHandleDefaultCf :: !(Ptr ColumnFamilyHandle)
+    }
+
 -- | This wrapper allows to create key namespaces. This is, for instance, useful
 -- for testing when running several concurrent tests on the same rocks db
 -- instances. Key namespaces must not contain the character '-'.
 --
 data RocksDb = RocksDb
-    { _rocksDbHandle :: !R.DB
+    { _rocksDbHandle :: !RocksDbHandle
     , _rocksDbNamespace :: !B.ByteString
     }
 
@@ -190,16 +206,66 @@ instance NoThunks RocksDb where
 
 makeLenses ''RocksDb
 
+ 
+foreign import ccall unsafe "rocksdb\\c.h rocksdb_open_column_families"
+    rocksdb_open_column_families
+        :: C.OptionsPtr {- database options -}
+        -> CString {- database name -}
+        -> CInt {- number of column families -}
+        -> Ptr CString {- column family names -}
+        -> Ptr C.OptionsPtr {- array of column family options -}
+        -> Ptr (Ptr ColumnFamilyHandle) {- output: array of pointers for holding column family handles -}
+        -> Ptr CString {- output: errptr -}
+        -> IO C.RocksDBPtr
+
 -- | Open a 'RocksDb' instance with the default namespace. If no rocks db exists
 -- at the provided directory path, a new database is created.
 --
-openRocksDb :: FilePath -> IO RocksDb
-openRocksDb path = do
-    db <- RocksDb <$> R.open path opts <*> mempty
-    initializeRocksDb db
-    return db
+-- This function is copied mostly unmodified from rocksdb-haskell *except* that we need
+-- a handle on the default column family.
+openRocksDb :: FilePath -> Maybe R.Options -> IO RocksDb
+openRocksDb path maybeOpts = bracketOnError initialize finalize mkDB
   where
-    opts = R.defaultOptions { R.createIfMissing = True }
+#ifdef mingw32_HOST_OS
+    initialize =
+        (, ()) <$> R.mkOpts opts
+    finalize (opts', ()) =
+        R.freeOpts opts'
+#else
+    initialize = do
+        opts' <- R.mkOpts opts
+        -- With LC_ALL=C, two things happen:
+        --   * rocksdb can't open a database with unicode in path;
+        --   * rocksdb can't create a folder properly.
+        -- So, we create the folder by ourselves, and for thart we
+        -- need to set the encoding we're going to use. On Linux
+        -- it's almost always UTC-8.
+        oldenc <- GHC.getFileSystemEncoding
+        when (R.createIfMissing opts) $
+            GHC.setFileSystemEncoding GHC.utf8
+        pure (opts', oldenc)
+    finalize (opts', oldenc) = do
+        R.freeOpts opts'
+        GHC.setFileSystemEncoding oldenc
+#endif
+    mkDB (opts'@(R.Options' opts_ptr _ _), _) = do
+        when (R.createIfMissing opts) $
+            createDirectoryIfMissing True path
+        db <- alloca $ \colFamOptions ->
+            alloca $ \colFamNames ->
+            alloca $ \colFamHandles ->
+            withCString "default" $ \colFamName ->
+            withFilePath path $ \path_ptr -> do
+                poke colFamNames colFamName
+                poke colFamOptions opts_ptr
+                dbUnderlying <- fmap (`R.DB` opts')
+                    $ checked "Data.CAS.RocksDB.openRocksDb"
+                    $ rocksdb_open_column_families opts_ptr path_ptr 1 colFamNames colFamOptions colFamHandles
+                colFamHandle <- peek colFamHandles
+                return $ RocksDb (RocksDbHandle dbUnderlying colFamHandle) mempty
+        initializeRocksDb db
+        return db
+    opts = fromMaybe R.defaultOptions { R.createIfMissing = True } maybeOpts
 
 -- | Each table key starts with @_rocksDbNamespace db <> "-"@. Here we insert a
 -- dummy key that is guaranteed to be appear after any other key in the
@@ -208,7 +274,7 @@ openRocksDb path = do
 --
 initializeRocksDb :: RocksDb -> IO ()
 initializeRocksDb db = R.put
-    (_rocksDbHandle db)
+    (_rocksDbHandleUnderlying $ _rocksDbHandle db)
     R.defaultWriteOptions
     (_rocksDbNamespace db <> ".")
     ""
@@ -218,29 +284,25 @@ initializeRocksDb db = R.put
 resetOpenRocksDb :: FilePath -> IO RocksDb
 resetOpenRocksDb path = do
     destroyRocksDb path
-    db <- RocksDb <$> R.open path opts <*> mempty
-    initializeRocksDb db
-    return db
-  where
-    opts = R.defaultOptions { R.createIfMissing = True, R.errorIfExists = True }
+    openRocksDb path $ Just R.defaultOptions { R.createIfMissing = True, R.errorIfExists = True }
 
 -- | Close a 'RocksDb' instance.
 --
 closeRocksDb :: RocksDb -> IO ()
-closeRocksDb = R.close . _rocksDbHandle
+closeRocksDb = R.close . _rocksDbHandleUnderlying . _rocksDbHandle
 
 -- | Provide a computation with a 'RocksDb' instance. If no rocks db exists at
 -- the provided directory path, a new database is created.
 --
-withRocksDb :: FilePath -> (RocksDb -> IO a) -> IO a
-withRocksDb path = bracket (openRocksDb path) closeRocksDb
+withRocksDb :: FilePath -> Maybe R.Options -> (RocksDb -> IO a) -> IO a
+withRocksDb path maybeOpts = bracket (openRocksDb path maybeOpts) closeRocksDb
 
 -- | Provide a computation with a temporary 'RocksDb'. The database is deleted
 -- when the computation exits.
 --
 withTempRocksDb :: String -> (RocksDb -> IO a) -> IO a
 withTempRocksDb template f = withSystemTempDirectory template $ \dir ->
-    withRocksDb dir f
+    withRocksDb dir Nothing f
 
 -- | Delete the RocksDb instance.
 --
@@ -289,7 +351,7 @@ data RocksDbTable k v = RocksDbTable
     { _rocksDbTableValueCodec :: !(Codec v)
     , _rocksDbTableKeyCodec :: !(Codec k)
     , _rocksDbTableNamespace :: !B.ByteString
-    , _rocksDbTableDb :: !R.DB
+    , _rocksDbTableDb :: !RocksDbHandle
     }
 
 instance NoThunks (RocksDbTable k v) where
@@ -329,7 +391,7 @@ newTable db valCodec keyCodec namespace
 --
 tableInsert :: RocksDbTable k v -> k -> v -> IO ()
 tableInsert db k v = R.put
-    (_rocksDbTableDb db)
+    (_rocksDbHandleUnderlying (_rocksDbTableDb db))
     R.defaultWriteOptions
     (encKey db k)
     (encVal db v)
@@ -341,7 +403,7 @@ tableInsert db k v = R.put
 --
 tableLookup :: RocksDbTable k v -> k -> IO (Maybe v)
 tableLookup db k = do
-    maybeBytes <- R.get (_rocksDbTableDb db) R.defaultReadOptions (encKey db k)
+    maybeBytes <- R.get (_rocksDbHandleUnderlying (_rocksDbTableDb db)) R.defaultReadOptions (encKey db k)
     traverse (decVal db) maybeBytes
 {-# INLINE tableLookup #-}
 
@@ -350,7 +412,7 @@ tableLookup db k = do
 --
 tableDelete :: RocksDbTable k v -> k -> IO ()
 tableDelete db k = R.delete
-    (_rocksDbTableDb db)
+    (_rocksDbHandleUnderlying (_rocksDbTableDb db))
     R.defaultWriteOptions
     (encKey db k)
 {-# INLINE tableDelete #-}
@@ -371,7 +433,7 @@ data RocksDbUpdate
         , _rocksDbUpdateValue :: !v
         }
 
-rocksDbUpdateDb :: RocksDbUpdate -> R.DB
+rocksDbUpdateDb :: RocksDbUpdate -> RocksDbHandle
 rocksDbUpdateDb (RocksDbDelete t _) = _rocksDbTableDb t
 rocksDbUpdateDb (RocksDbInsert t _ _) = _rocksDbTableDb t
 {-# INLINE rocksDbUpdateDb #-}
@@ -385,10 +447,10 @@ updateBatch :: HasCallStack => [RocksDbUpdate] -> IO ()
 updateBatch [] = return ()
 updateBatch batch = R.write rdb R.defaultWriteOptions $ checkMkOp <$> batch
   where
-    rdb = rocksDbUpdateDb $ head batch
+    rdb = _rocksDbHandleUnderlying $ rocksDbUpdateDb $ head batch
 
     checkMkOp o
-        | rdb == rocksDbUpdateDb o = mkOp o
+        | rdb == _rocksDbHandleUnderlying (rocksDbUpdateDb o) = mkOp o
         | otherwise = error "Data.CAS.RocksDB.updateBatch: all operations in a batch must be for the same RocksDB instance."
 
     mkOp (RocksDbDelete t k) = R.Del (encKey t k)
@@ -439,7 +501,7 @@ createTableIter db = do
         (_rocksDbTableValueCodec db)
         (_rocksDbTableKeyCodec db)
         (_rocksDbTableNamespace db)
-        <$> I.createIter (_rocksDbTableDb db) R.defaultReadOptions
+        <$> I.createIter (_rocksDbHandleUnderlying $ _rocksDbTableDb db) R.defaultReadOptions
     tableIterFirst tit
     return tit
 {-# INLINE createTableIter #-}
@@ -785,32 +847,35 @@ foreign import ccall unsafe "rocksdb\\c.h rocksdb_checkpoint_create"
 foreign import ccall unsafe "rocksdb\\c.h rocksdb_checkpoint_object_destroy"
     rocksdb_checkpoint_object_destroy :: Ptr Checkpoint -> IO ()
 
-checked :: HasCallStack => String -> Ptr CString -> IO a -> IO a
-checked whatWasIDoing errPtr act = do
-    r <- act
+foreign import ccall unsafe "rocksdb\\c.h rocksdb_free"
+    rocksdb_free :: Ptr a -> IO ()
+
+checked :: HasCallStack => String -> (Ptr CString -> IO a) -> IO a
+checked whatWasIDoing act = alloca $ \errPtr -> do
+    poke errPtr (nullPtr :: CString)
+    r <- act errPtr
     err <- peek errPtr
     unless (err == nullPtr) $ do
         errStr <- B.packCString err
         let msg = unwords ["Data.CAS.RocksDB.checked: error while", whatWasIDoing <> ":", B8.unpack errStr]
-        free err
+        rocksdb_free err
         error msg
     return r
 
 -- to unconditionally flush the WAL log before making the checkpoint, set logSizeFlushThreshold to zero. 
 -- to *never* flush the WAL log, set logSizeFlushThreshold to maxBound :: CULong.
-checkpointRocksDb :: RocksDb -> CULong -> FilePath -> IO ()
-checkpointRocksDb RocksDb { _rocksDbHandle = R.DB dbPtr _ } logSizeFlushThreshold path = 
-    alloca $ \errPtr -> do
-        poke errPtr (nullPtr :: CString)
+checkpointRocksDb :: HasCallStack => RocksDb -> CULong -> FilePath -> IO ()
+checkpointRocksDb RocksDb { _rocksDbHandle = RocksDbHandle { _rocksDbHandleUnderlying = R.DB dbPtr _ } } logSizeFlushThreshold path = 
         let 
             mkCheckpointObject = 
-                checked "creating checkpoint object" errPtr $ 
-                    rocksdb_checkpoint_object_create dbPtr errPtr
+                checked "creating checkpoint object" $ 
+                    rocksdb_checkpoint_object_create dbPtr 
             mkCheckpoint cp =
                 withCString path $ \path' -> 
-                    checked "creating checkpoint" errPtr $ 
-                        rocksdb_checkpoint_create cp path' logSizeFlushThreshold errPtr
-        bracket mkCheckpointObject rocksdb_checkpoint_object_destroy mkCheckpoint 
+                    checked "creating checkpoint" $ 
+                        rocksdb_checkpoint_create cp path' logSizeFlushThreshold 
+        in
+            bracket mkCheckpointObject rocksdb_checkpoint_object_destroy mkCheckpoint 
 
 foreign import ccall unsafe "rocksdb\\c.h rocksdb_approximate_sizes" 
     rocksdb_approximate_sizes
@@ -824,22 +889,56 @@ foreign import ccall unsafe "rocksdb\\c.h rocksdb_approximate_sizes"
         -> {- errptr -} Ptr CString 
         -> IO ()
 
-approxTableSizeRocksDb :: RocksDb -> RocksDbTable k v -> IO CULong
-approxTableSizeRocksDb RocksDb { _rocksDbHandle = R.DB dbPtr _ } table = do
+approxTableSizeRocksDb :: HasCallStack => RocksDb -> RocksDbTable k v -> IO CULong
+approxTableSizeRocksDb RocksDb { _rocksDbHandle = RocksDbHandle { _rocksDbHandleUnderlying = R.DB dbPtr _ } } table = do
     alloca $ \rangeStartPtr ->
         alloca $ \rangeStartLengthPtr ->
         alloca $ \rangeEndPtr -> 
         alloca $ \rangeEndLengthPtr -> 
         alloca $ \sizePtr ->
-        alloca $ \errPtr -> 
         B.useAsCStringLen (namespaceFirst $ _rocksDbTableNamespace table) $ \(minKeyPtr, minKeyLen) ->
         B.useAsCStringLen (namespaceLast $ _rocksDbTableNamespace table) $ \(maxKeyPtr, maxKeyLen) -> do
             poke rangeStartPtr minKeyPtr
             poke rangeStartLengthPtr (fromIntegral minKeyLen :: CSize)
             poke rangeEndPtr maxKeyPtr
             poke rangeEndLengthPtr (fromIntegral maxKeyLen :: CSize)
-            poke errPtr (nullPtr :: CString)
-            checked "calculating approximate table size" errPtr $ 
-                rocksdb_approximate_sizes dbPtr 1 rangeStartPtr rangeStartLengthPtr rangeEndPtr rangeEndLengthPtr sizePtr errPtr
+            checked "calculating approximate table size" $ 
+                rocksdb_approximate_sizes dbPtr 1 rangeStartPtr rangeStartLengthPtr rangeEndPtr rangeEndLengthPtr sizePtr 
             peek sizePtr
 
+foreign import ccall unsafe "rocksdb\\c.h rocksdb_delete_range_cf"
+    rocksdb_delete_range_cf
+        :: C.RocksDBPtr
+        -> C.WriteOptionsPtr 
+        -> Ptr ColumnFamilyHandle
+        -> CString {- min key -}
+        -> CSize {- min key length -}
+        -> CString {- max key length -}
+        -> CSize {- max key length -}
+        -> Ptr CString {- output: errptr -}
+        -> IO ()
+
+-- | Batch delete a range of keys in a table. 
+-- Throws if the range of the *encoded keys* is not ordered (lower, upper).
+deleteRange :: HasCallStack => RocksDbTable k v -> (k, k) -> IO ()
+deleteRange table range = do
+    let range' = over each (encKey table) range
+    if fst range' >= snd range' then
+        error "Data.CAS.RocksDB.deleteRange: range bounds not ordered according to codec"
+    else do
+        let defaultCf = _rocksDbHandleDefaultCf $ _rocksDbTableDb table
+        let R.DB dbPtr _ = _rocksDbHandleUnderlying $ _rocksDbTableDb table
+        R.withCWriteOpts R.defaultWriteOptions $ \optsPtr ->
+            B.useAsCStringLen (fst range') $ \(minKeyPtr, minKeyLen) ->
+            B.useAsCStringLen (snd range') $ \(maxKeyPtr, maxKeyLen) ->
+            checked "Data.CAS.RocksDB.deleteRange" $ 
+                rocksdb_delete_range_cf dbPtr optsPtr defaultCf minKeyPtr (fromIntegral minKeyLen :: CSize) maxKeyPtr (fromIntegral maxKeyLen :: CSize)
+
+-- | Marshal a 'FilePath' (Haskell string) into a `NUL` terminated C string using
+-- temporary storage.
+-- On Linux, UTF-8 is almost always the encoding used.
+-- When on Windows, UTF-8 can also be used, although the default for those devices is
+-- UTF-16. For a more detailed explanation, please refer to
+-- https://msdn.microsoft.com/en-us/library/windows/desktop/dd374081(v=vs.85).aspx.
+withFilePath :: FilePath -> (CString -> IO a) -> IO a
+withFilePath = GHC.withCString GHC.utf8
