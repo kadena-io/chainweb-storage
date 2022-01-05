@@ -300,9 +300,9 @@ withRocksDb path opts = bracket (openRocksDb path opts) closeRocksDb
 -- | Provide a computation with a temporary 'RocksDb'. The database is deleted
 -- when the computation exits.
 --
-withTempRocksDb :: String -> R.Options -> (RocksDb -> IO a) -> IO a
-withTempRocksDb template opts f = withSystemTempDirectory template $ \dir ->
-    withRocksDb dir opts f
+withTempRocksDb :: String -> (RocksDb -> IO a) -> IO a
+withTempRocksDb template f = withSystemTempDirectory template $ \dir ->
+    withRocksDb dir R.defaultOptions { R.createIfMissing = True } f
 
 -- | Delete the RocksDb instance.
 --
