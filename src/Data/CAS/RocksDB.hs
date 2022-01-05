@@ -107,6 +107,8 @@ module Data.CAS.RocksDB
 , checkpointRocksDb
 , approxTableSizeRocksDb
 , deleteRange
+, R.defaultOptions
+, R.Options(..)
 ) where
 
 import Control.Lens
@@ -118,7 +120,6 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as B8
 
 import Data.CAS
-import Data.Maybe
 import Data.String
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -223,8 +224,8 @@ foreign import ccall unsafe "rocksdb\\c.h rocksdb_open_column_families"
 --
 -- This function is copied mostly unmodified from rocksdb-haskell *except* that we need
 -- a handle on the default column family.
-openRocksDb :: FilePath -> Maybe R.Options -> IO RocksDb
-openRocksDb path maybeOpts = bracketOnError initialize finalize mkDB
+openRocksDb :: FilePath -> R.Options -> IO RocksDb
+openRocksDb path opts = bracketOnError initialize finalize mkDB
   where
 #ifdef mingw32_HOST_OS
     initialize =
@@ -265,7 +266,6 @@ openRocksDb path maybeOpts = bracketOnError initialize finalize mkDB
                 return $ RocksDb (RocksDbHandle dbUnderlying colFamHandle) mempty
         initializeRocksDb db
         return db
-    opts = fromMaybe R.defaultOptions { R.createIfMissing = True } maybeOpts
 
 -- | Each table key starts with @_rocksDbNamespace db <> "-"@. Here we insert a
 -- dummy key that is guaranteed to be appear after any other key in the
@@ -284,7 +284,7 @@ initializeRocksDb db = R.put
 resetOpenRocksDb :: FilePath -> IO RocksDb
 resetOpenRocksDb path = do
     destroyRocksDb path
-    openRocksDb path $ Just R.defaultOptions { R.createIfMissing = True, R.errorIfExists = True }
+    openRocksDb path R.defaultOptions { R.createIfMissing = True, R.errorIfExists = True }
 
 -- | Close a 'RocksDb' instance.
 --
@@ -294,15 +294,15 @@ closeRocksDb = R.close . _rocksDbHandleUnderlying . _rocksDbHandle
 -- | Provide a computation with a 'RocksDb' instance. If no rocks db exists at
 -- the provided directory path, a new database is created.
 --
-withRocksDb :: FilePath -> Maybe R.Options -> (RocksDb -> IO a) -> IO a
-withRocksDb path maybeOpts = bracket (openRocksDb path maybeOpts) closeRocksDb
+withRocksDb :: FilePath -> R.Options -> (RocksDb -> IO a) -> IO a
+withRocksDb path opts = bracket (openRocksDb path opts) closeRocksDb
 
 -- | Provide a computation with a temporary 'RocksDb'. The database is deleted
 -- when the computation exits.
 --
-withTempRocksDb :: String -> (RocksDb -> IO a) -> IO a
-withTempRocksDb template f = withSystemTempDirectory template $ \dir ->
-    withRocksDb dir Nothing f
+withTempRocksDb :: String -> R.Options -> (RocksDb -> IO a) -> IO a
+withTempRocksDb template opts f = withSystemTempDirectory template $ \dir ->
+    withRocksDb dir opts f
 
 -- | Delete the RocksDb instance.
 --
