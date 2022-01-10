@@ -17,6 +17,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- |
@@ -823,18 +824,19 @@ foreign import ccall unsafe "cpp\\chainweb-rocksdb.h rocksdb_delete_range"
         -> Ptr CString {- output: errptr -}
         -> IO ()
 
-validateRangeOrdered :: HasCallStack => RocksDbTable k v -> (k, k) -> (B.ByteString, B.ByteString)
-validateRangeOrdered table range =
-    if fst range' >= snd range' 
-        then error "Data.CAS.RocksDB.validateRangeOrdered: range bounds not ordered according to codec"
-    else 
-        range'
-  where 
-    range' = over each (encKey table) range
+validateRangeOrdered :: HasCallStack => RocksDbTable k v -> (Maybe k, Maybe k) -> (B.ByteString, B.ByteString)
+validateRangeOrdered table (Just (encKey table -> l), Just (encKey table -> u)) 
+    | l >= u =
+        error "Data.CAS.RocksDB.validateRangeOrdered: range bounds not ordered according to codec"
+    | otherwise = (l, u)
+validateRangeOrdered table (l, u) = 
+    ( maybe (namespaceFirst (_rocksDbTableNamespace table)) (encKey table) l
+    , maybe (namespaceLast (_rocksDbTableNamespace table)) (encKey table) u 
+    )
 
 -- | Batch delete a range of keys in a table. 
 -- Throws if the range of the *encoded keys* is not ordered (lower, upper).
-deleteRangeRocksDb :: HasCallStack => RocksDbTable k v -> (k, k) -> IO ()
+deleteRangeRocksDb :: HasCallStack => RocksDbTable k v -> (Maybe k, Maybe k) -> IO ()
 deleteRangeRocksDb table range = do
     let !range' = validateRangeOrdered table range
     let R.DB dbPtr _ = _rocksDbTableDb table
@@ -855,7 +857,7 @@ foreign import ccall unsafe "rocksdb\\c.h rocksdb_compact_range"
         -> CSize {- max key length -}
         -> IO ()
 
-compactRangeRocksDb :: HasCallStack => RocksDbTable k v -> (k, k) -> IO ()
+compactRangeRocksDb :: HasCallStack => RocksDbTable k v -> (Maybe k, Maybe k) -> IO ()
 compactRangeRocksDb table range = 
     B.useAsCStringLen (fst range') $ \(minKeyPtr, minKeyLen) ->
         B.useAsCStringLen (snd range') $ \(maxKeyPtr, maxKeyLen) ->
