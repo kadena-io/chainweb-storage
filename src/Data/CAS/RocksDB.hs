@@ -102,6 +102,7 @@ module Data.CAS.RocksDB
 -- * RocksDB-specific tools
 , checkpointRocksDb
 , deleteRangeRocksDb
+, compactRangeRocksDb
 ) where
 
 import Control.Lens
@@ -822,20 +823,45 @@ foreign import ccall unsafe "cpp\\chainweb-rocksdb.h rocksdb_delete_range"
         -> Ptr CString {- output: errptr -}
         -> IO ()
 
+validateRangeOrdered :: HasCallStack => RocksDbTable k v -> (k, k) -> (B.ByteString, B.ByteString)
+validateRangeOrdered table range =
+    if fst range' >= snd range' 
+        then error "Data.CAS.RocksDB.validateRangeOrdered: range bounds not ordered according to codec"
+    else 
+        range'
+  where 
+    range' = over each (encKey table) range
+
 -- | Batch delete a range of keys in a table. 
 -- Throws if the range of the *encoded keys* is not ordered (lower, upper).
 deleteRangeRocksDb :: HasCallStack => RocksDbTable k v -> (k, k) -> IO ()
 deleteRangeRocksDb table range = do
-    let range' = over each (encKey table) range
-    if fst range' >= snd range' then
-        error "Data.CAS.RocksDB.deleteRange: range bounds not ordered according to codec"
-    else do
-        let R.DB dbPtr _ = _rocksDbTableDb table
-        R.withCWriteOpts R.defaultWriteOptions $ \optsPtr ->
-            B.useAsCStringLen (fst range') $ \(minKeyPtr, minKeyLen) ->
-            B.useAsCStringLen (snd range') $ \(maxKeyPtr, maxKeyLen) ->
-            checked "Data.CAS.RocksDB.deleteRange" $ 
-                rocksdb_delete_range dbPtr optsPtr 
-                    minKeyPtr (fromIntegral minKeyLen :: CSize) 
-                    maxKeyPtr (fromIntegral maxKeyLen :: CSize)
+    let !range' = validateRangeOrdered table range
+    let R.DB dbPtr _ = _rocksDbTableDb table
+    R.withCWriteOpts R.defaultWriteOptions $ \optsPtr ->
+        B.useAsCStringLen (fst range') $ \(minKeyPtr, minKeyLen) ->
+        B.useAsCStringLen (snd range') $ \(maxKeyPtr, maxKeyLen) ->
+        checked "Data.CAS.RocksDB.deleteRangeRocksDb" $ 
+            rocksdb_delete_range dbPtr optsPtr 
+                minKeyPtr (fromIntegral minKeyLen :: CSize) 
+                maxKeyPtr (fromIntegral maxKeyLen :: CSize)
 
+foreign import ccall unsafe "rocksdb\\c.h rocksdb_compact_range"
+    rocksdb_compact_range
+        :: C.RocksDBPtr
+        -> CString {- min key -}
+        -> CSize {- min key length -}
+        -> CString {- max key -}
+        -> CSize {- max key length -}
+        -> IO ()
+
+compactRangeRocksDb :: HasCallStack => RocksDbTable k v -> (k, k) -> IO ()
+compactRangeRocksDb table range = 
+    B.useAsCStringLen (fst range') $ \(minKeyPtr, minKeyLen) ->
+        B.useAsCStringLen (snd range') $ \(maxKeyPtr, maxKeyLen) ->
+        rocksdb_compact_range dbPtr 
+            minKeyPtr (fromIntegral minKeyLen :: CSize) 
+            maxKeyPtr (fromIntegral maxKeyLen :: CSize)
+  where
+    !range' = validateRangeOrdered table range
+    R.DB dbPtr _ = _rocksDbTableDb table
