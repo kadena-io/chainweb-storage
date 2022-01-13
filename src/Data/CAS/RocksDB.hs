@@ -119,10 +119,8 @@ import Data.String
 import qualified Data.Text as T
 import qualified Data.Vector as V
 
+import Foreign
 import Foreign.C
-import Foreign.Marshal
-import Foreign.Ptr
-import Foreign.Storable
 
 import qualified Database.RocksDB.Base as R
 import qualified Database.RocksDB.C as C
@@ -192,6 +190,12 @@ instance NoThunks RocksDb where
 
 makeLenses ''RocksDb
 
+modernDefaultOptions :: R.Options
+modernDefaultOptions = R.defaultOptions 
+    { R.maxOpenFiles = -1
+    , R.writeBufferSize = 64 `shift` 20
+    }
+
 -- | Open a 'RocksDb' instance with the default namespace. If no rocks db exists
 -- at the provided directory path, a new database is created.
 --
@@ -201,7 +205,7 @@ openRocksDb path = do
     initializeRocksDb db
     return db
   where
-    opts = R.defaultOptions { R.createIfMissing = True }
+    opts = modernDefaultOptions { R.createIfMissing = True }
 
 -- | Each table key starts with @_rocksDbNamespace db <> "-"@. Here we insert a
 -- dummy key that is guaranteed to be appear after any other key in the
@@ -224,7 +228,7 @@ resetOpenRocksDb path = do
     initializeRocksDb db
     return db
   where
-    opts = R.defaultOptions { R.createIfMissing = True, R.errorIfExists = True }
+    opts = modernDefaultOptions { R.createIfMissing = True, R.errorIfExists = True }
 
 -- | Close a 'RocksDb' instance.
 --
@@ -253,7 +257,7 @@ withTempRocksDb template f = withSystemTempDirectory template $ \dir ->
 destroyRocksDb :: FilePath -> IO ()
 destroyRocksDb path = R.destroy path opts
   where
-    opts = R.defaultOptions { R.createIfMissing = False }
+    opts = modernDefaultOptions { R.createIfMissing = False }
 
 -- -------------------------------------------------------------------------- --
 -- RocksDb Table
