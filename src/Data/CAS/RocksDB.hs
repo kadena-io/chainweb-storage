@@ -852,7 +852,7 @@ deleteRangeRocksDb table range = do
                 minKeyPtr (fromIntegral minKeyLen :: CSize) 
                 maxKeyPtr (fromIntegral maxKeyLen :: CSize)
 
-foreign import ccall unsafe "rocksdb\\c.h rocksdb_compact_range"
+foreign import ccall safe "rocksdb\\c.h rocksdb_compact_range"
     rocksdb_compact_range
         :: C.RocksDBPtr
         -> CString {- min key -}
