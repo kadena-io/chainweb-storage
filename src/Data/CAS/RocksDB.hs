@@ -111,8 +111,11 @@ import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.IO.Class
 
+import Data.ByteString(ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as B8
+import qualified Data.ByteString.Unsafe as BU
+import Data.Coerce
 
 import Data.CAS
 import Data.String
@@ -347,7 +350,7 @@ tableInsert db k v = R.put
 --
 tableLookup :: RocksDbTable k v -> k -> IO (Maybe v)
 tableLookup db k = do
-    maybeBytes <- R.get (_rocksDbTableDb db) R.defaultReadOptions (encKey db k)
+    maybeBytes <- get (_rocksDbTableDb db) R.defaultReadOptions (encKey db k)
     traverse (decVal db) maybeBytes
 {-# INLINE tableLookup #-}
 
@@ -871,3 +874,20 @@ compactRangeRocksDb table range =
   where
     !range' = validateRangeOrdered table range
     R.DB dbPtr _ = _rocksDbTableDb table
+
+-- | Read a value by key.
+-- One less copy than the version in rocksdb-haskell by using unsafePackCStringFinalizer.
+get :: MonadIO m => R.DB -> R.ReadOptions -> ByteString -> m (Maybe ByteString)
+get (R.DB db_ptr _) opts key = liftIO $ R.withCReadOpts opts $ \opts_ptr ->
+    BU.unsafeUseAsCStringLen key $ \(key_ptr, klen) ->
+    alloca                       $ \vlen_ptr -> do
+        val_ptr <- checked "Data.CAS.RocksDB.get" $
+            C.c_rocksdb_get db_ptr opts_ptr key_ptr (R.intToCSize klen) vlen_ptr
+        vlen <- peek vlen_ptr
+        if val_ptr == nullPtr
+            then return Nothing
+            else do
+                Just <$> BU.unsafePackCStringFinalizer 
+                    ((coerce :: Ptr CChar -> Ptr Word8) val_ptr) 
+                    (R.cSizeToInt vlen) 
+                    (C.c_rocksdb_free val_ptr)
