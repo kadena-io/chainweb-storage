@@ -848,8 +848,8 @@ deleteRangeRocksDb table range = do
     let !range' = validateRangeOrdered table range
     let R.DB dbPtr _ = _rocksDbTableDb table
     R.withCWriteOpts R.defaultWriteOptions $ \optsPtr ->
-        B.useAsCStringLen (fst range') $ \(minKeyPtr, minKeyLen) ->
-        B.useAsCStringLen (snd range') $ \(maxKeyPtr, maxKeyLen) ->
+        BU.unsafeUseAsCStringLen (fst range') $ \(minKeyPtr, minKeyLen) ->
+        BU.unsafeUseAsCStringLen (snd range') $ \(maxKeyPtr, maxKeyLen) ->
         checked "Data.CAS.RocksDB.deleteRangeRocksDb" $ 
             rocksdb_delete_range dbPtr optsPtr 
                 minKeyPtr (fromIntegral minKeyLen :: CSize) 
@@ -866,8 +866,8 @@ foreign import ccall safe "rocksdb\\c.h rocksdb_compact_range"
 
 compactRangeRocksDb :: HasCallStack => RocksDbTable k v -> (Maybe k, Maybe k) -> IO ()
 compactRangeRocksDb table range = 
-    B.useAsCStringLen (fst range') $ \(minKeyPtr, minKeyLen) ->
-        B.useAsCStringLen (snd range') $ \(maxKeyPtr, maxKeyLen) ->
+    BU.unsafeUseAsCStringLen (fst range') $ \(minKeyPtr, minKeyLen) ->
+        BU.unsafeUseAsCStringLen (snd range') $ \(maxKeyPtr, maxKeyLen) ->
         rocksdb_compact_range dbPtr 
             minKeyPtr (fromIntegral minKeyLen :: CSize) 
             maxKeyPtr (fromIntegral maxKeyLen :: CSize)
@@ -880,7 +880,7 @@ compactRangeRocksDb table range =
 get :: MonadIO m => R.DB -> R.ReadOptions -> ByteString -> m (Maybe ByteString)
 get (R.DB db_ptr _) opts key = liftIO $ R.withCReadOpts opts $ \opts_ptr ->
     BU.unsafeUseAsCStringLen key $ \(key_ptr, klen) ->
-    alloca                       $ \vlen_ptr -> do
+    alloca $ \vlen_ptr -> do
         val_ptr <- checked "Data.CAS.RocksDB.get" $
             C.c_rocksdb_get db_ptr opts_ptr key_ptr (R.intToCSize klen) vlen_ptr
         vlen <- peek vlen_ptr
