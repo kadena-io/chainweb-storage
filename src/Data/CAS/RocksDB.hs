@@ -55,6 +55,7 @@ module Data.CAS.RocksDB
 , RocksDbTable
 , newTable
 , tableLookup
+, tableLookupBatch
 , tableInsert
 , tableDelete
 
@@ -194,7 +195,7 @@ instance NoThunks RocksDb where
 makeLenses ''RocksDb
 
 modernDefaultOptions :: R.Options
-modernDefaultOptions = R.defaultOptions 
+modernDefaultOptions = R.defaultOptions
     { R.maxOpenFiles = -1
     , R.writeBufferSize = 64 `shift` 20
     }
@@ -353,6 +354,22 @@ tableLookup db k = do
     maybeBytes <- get (_rocksDbTableDb db) R.defaultReadOptions (encKey db k)
     traverse (decVal db) maybeBytes
 {-# INLINE tableLookup #-}
+
+-- | @tableLookupBatch db ks@ returns for each @k@ in @ks@ 'Just' the value at
+-- key @k@ in the 'RocksDbTable' @db@ if it exists, or 'Nothing' if the @k@
+-- doesn't exist in the table.
+--
+tableLookupBatch
+    :: HasCallStack
+    => RocksDbTable k v
+    -> V.Vector k
+    -> IO (V.Vector (Maybe v))
+tableLookupBatch db ks = do
+    results <- multiGet (_rocksDbTableDb db) R.defaultReadOptions (V.map (encKey db) ks)
+    V.forM results $ \case
+        Left e -> error $ "Data.CAS.RocksDB.tableLookupBatch: " <> e
+        Right x -> traverse (decVal db) x
+{-# INLINE tableLookupBatch #-}
 
 -- | @tableDelete db k@ deletes the value at the key @k@ from the 'RocksDbTable'
 -- db. If the @k@ doesn't exist in @db@ this function does nothing.
@@ -642,7 +659,10 @@ tableMinEntry = flip withTableIter $ \i -> tableIterFirst i *> tableIterEntry i
 instance (IsCasValue v, CasKeyType v ~ k) => HasCasLookup (RocksDbTable k v) where
     type CasValueType (RocksDbTable k v) = v
     casLookup = tableLookup
+    casLookupBatch = tableLookupBatch
+
     {-# INLINE casLookup #-}
+    {-# INLINE casLookupBatch #-}
 
 -- | For a 'IsCasValue' @v@ with 'CasKeyType v ~ k@,  a 'RocksDbTable k v' is an
 -- instance of 'IsCas'.
@@ -673,7 +693,10 @@ newtype RocksDbCas v = RocksDbCas { _getRocksDbCas :: RocksDbTable (CasKeyType v
 instance IsCasValue v => HasCasLookup (RocksDbCas v) where
     type CasValueType (RocksDbCas v) = v
     casLookup (RocksDbCas x) = casLookup x
+    casLookupBatch (RocksDbCas x) = casLookupBatch x
+
     {-# INLINE casLookup #-}
+    {-# INLINE casLookupBatch #-}
 
 instance IsCasValue v => IsCas (RocksDbCas v) where
     casInsert (RocksDbCas x) = casInsert x
@@ -785,7 +808,7 @@ decIterKey it k = case B.splitAt (B.length prefix) k of
 
 data Checkpoint
 
-foreign import ccall unsafe "rocksdb\\c.h rocksdb_checkpoint_object_create" 
+foreign import ccall unsafe "rocksdb\\c.h rocksdb_checkpoint_object_create"
     rocksdb_checkpoint_object_create :: C.RocksDBPtr -> Ptr CString -> IO (Ptr Checkpoint)
 
 foreign import ccall unsafe "rocksdb\\c.h rocksdb_checkpoint_create"
@@ -806,24 +829,24 @@ checked whatWasIDoing act = alloca $ \errPtr -> do
         error msg
     return r
 
--- to unconditionally flush the WAL log before making the checkpoint, set logSizeFlushThreshold to zero. 
+-- to unconditionally flush the WAL log before making the checkpoint, set logSizeFlushThreshold to zero.
 -- to *never* flush the WAL log, set logSizeFlushThreshold to maxBound :: CULong.
 checkpointRocksDb :: RocksDb -> CULong -> FilePath -> IO ()
-checkpointRocksDb RocksDb { _rocksDbHandle = R.DB dbPtr _ } logSizeFlushThreshold path = 
-    bracket mkCheckpointObject rocksdb_checkpoint_object_destroy mkCheckpoint 
+checkpointRocksDb RocksDb { _rocksDbHandle = R.DB dbPtr _ } logSizeFlushThreshold path =
+    bracket mkCheckpointObject rocksdb_checkpoint_object_destroy mkCheckpoint
   where
-    mkCheckpointObject = 
-        checked "creating checkpoint object" $ 
-            rocksdb_checkpoint_object_create dbPtr 
+    mkCheckpointObject =
+        checked "creating checkpoint object" $
+            rocksdb_checkpoint_object_create dbPtr
     mkCheckpoint cp =
-        withCString path $ \path' -> 
-            checked "creating checkpoint" $ 
-                rocksdb_checkpoint_create cp path' logSizeFlushThreshold 
+        withCString path $ \path' ->
+            checked "creating checkpoint" $
+                rocksdb_checkpoint_create cp path' logSizeFlushThreshold
 
 foreign import ccall unsafe "cpp\\chainweb-rocksdb.h rocksdb_delete_range"
     rocksdb_delete_range
         :: C.RocksDBPtr
-        -> C.WriteOptionsPtr 
+        -> C.WriteOptionsPtr
         -> CString {- min key -}
         -> CSize {- min key length -}
         -> CString {- max key length -}
@@ -832,16 +855,16 @@ foreign import ccall unsafe "cpp\\chainweb-rocksdb.h rocksdb_delete_range"
         -> IO ()
 
 validateRangeOrdered :: HasCallStack => RocksDbTable k v -> (Maybe k, Maybe k) -> (B.ByteString, B.ByteString)
-validateRangeOrdered table (Just (encKey table -> l), Just (encKey table -> u)) 
+validateRangeOrdered table (Just (encKey table -> l), Just (encKey table -> u))
     | l >= u =
         error "Data.CAS.RocksDB.validateRangeOrdered: range bounds not ordered according to codec"
     | otherwise = (l, u)
-validateRangeOrdered table (l, u) = 
+validateRangeOrdered table (l, u) =
     ( maybe (namespaceFirst (_rocksDbTableNamespace table)) (encKey table) l
-    , maybe (namespaceLast (_rocksDbTableNamespace table)) (encKey table) u 
+    , maybe (namespaceLast (_rocksDbTableNamespace table)) (encKey table) u
     )
 
--- | Batch delete a range of keys in a table. 
+-- | Batch delete a range of keys in a table.
 -- Throws if the range of the *encoded keys* is not ordered (lower, upper).
 deleteRangeRocksDb :: HasCallStack => RocksDbTable k v -> (Maybe k, Maybe k) -> IO ()
 deleteRangeRocksDb table range = do
@@ -850,9 +873,9 @@ deleteRangeRocksDb table range = do
     R.withCWriteOpts R.defaultWriteOptions $ \optsPtr ->
         BU.unsafeUseAsCStringLen (fst range') $ \(minKeyPtr, minKeyLen) ->
         BU.unsafeUseAsCStringLen (snd range') $ \(maxKeyPtr, maxKeyLen) ->
-        checked "Data.CAS.RocksDB.deleteRangeRocksDb" $ 
-            rocksdb_delete_range dbPtr optsPtr 
-                minKeyPtr (fromIntegral minKeyLen :: CSize) 
+        checked "Data.CAS.RocksDB.deleteRangeRocksDb" $
+            rocksdb_delete_range dbPtr optsPtr
+                minKeyPtr (fromIntegral minKeyLen :: CSize)
                 maxKeyPtr (fromIntegral maxKeyLen :: CSize)
 
 foreign import ccall safe "rocksdb\\c.h rocksdb_compact_range"
@@ -865,11 +888,11 @@ foreign import ccall safe "rocksdb\\c.h rocksdb_compact_range"
         -> IO ()
 
 compactRangeRocksDb :: HasCallStack => RocksDbTable k v -> (Maybe k, Maybe k) -> IO ()
-compactRangeRocksDb table range = 
+compactRangeRocksDb table range =
     BU.unsafeUseAsCStringLen (fst range') $ \(minKeyPtr, minKeyLen) ->
         BU.unsafeUseAsCStringLen (snd range') $ \(maxKeyPtr, maxKeyLen) ->
-        rocksdb_compact_range dbPtr 
-            minKeyPtr (fromIntegral minKeyLen :: CSize) 
+        rocksdb_compact_range dbPtr
+            minKeyPtr (fromIntegral minKeyLen :: CSize)
             maxKeyPtr (fromIntegral maxKeyLen :: CSize)
   where
     !range' = validateRangeOrdered table range
@@ -887,7 +910,87 @@ get (R.DB db_ptr _) opts key = liftIO $ R.withCReadOpts opts $ \opts_ptr ->
         if val_ptr == nullPtr
             then return Nothing
             else do
-                Just <$> BU.unsafePackCStringFinalizer 
-                    ((coerce :: Ptr CChar -> Ptr Word8) val_ptr) 
-                    (R.cSizeToInt vlen) 
+                Just <$> BU.unsafePackCStringFinalizer
+                    ((coerce :: Ptr CChar -> Ptr Word8) val_ptr)
+                    (R.cSizeToInt vlen)
                     (C.c_rocksdb_free val_ptr)
+
+-- -------------------------------------------------------------------------- --
+-- Multi Get
+
+multiGet
+    :: MonadIO m
+    => R.DB
+    -> R.ReadOptions
+    -> V.Vector ByteString
+    -> m (V.Vector (Either String (Maybe ByteString)))
+multiGet (R.DB db_ptr _) opts keys = liftIO $ R.withCReadOpts opts $ \opts_ptr ->
+    allocaArray len $ \keysArray ->
+    allocaArray len $ \keySizesArray ->
+    allocaArray len $ \valuesArray ->
+    allocaArray len $ \valueSizesArray ->
+    allocaArray len $ \errsArray ->
+        let go i (key : ks) =
+                BU.unsafeUseAsCStringLen key $ \(keyPtr, keyLen) -> do
+                    pokeElemOff keysArray i keyPtr
+                    pokeElemOff keySizesArray i (R.intToCSize keyLen)
+                    go (i + 1) ks
+
+            go _ [] = do
+                rocksdb_multi_get db_ptr opts_ptr (R.intToCSize len)
+                    keysArray keySizesArray
+                    valuesArray valueSizesArray
+                    errsArray
+                V.generateM len $ \i -> do
+                  valuePtr <- peekElemOff valuesArray i
+                  if valuePtr /= nullPtr
+                    then do
+                      valueLen <- R.cSizeToInt <$> peekElemOff valueSizesArray i
+                      r <- BU.unsafePackMallocCStringLen (valuePtr, valueLen)
+                      return $ Right $ Just r
+                    else do
+                      errPtr <- peekElemOff errsArray i
+                      if errPtr /= nullPtr
+                        then do
+                          err <- B8.unpack <$> BU.unsafePackMallocCString errPtr
+                          return $ Left err
+                        else
+                          return $ Right Nothing
+        in go 0 $ V.toList keys
+  where
+    len = V.length keys
+
+-- // if values_list[i] == NULL and errs[i] == NULL,
+-- // then we got status.IsNotFound(), which we will not return.
+-- // all errors except status status.ok() and status.IsNotFound() are returned.
+-- //
+-- // errs, values_list and values_list_sizes must be num_keys in length,
+-- // allocated by the caller.
+-- // errs is a list of strings as opposed to the conventional one error,
+-- // where errs[i] is the status for retrieval of keys_list[i].
+-- // each non-NULL errs entry is a malloc()ed, null terminated string.
+-- // each non-NULL values_list entry is a malloc()ed array, with
+-- // the length for each stored in values_list_sizes[i].
+-- extern ROCKSDB_LIBRARY_API void rocksdb_multi_get(
+--     rocksdb_t* db, const rocksdb_readoptions_t* options, size_t num_keys,
+--     const char* const* keys_list, const size_t* keys_list_sizes,
+--     char** values_list, size_t* values_list_sizes, char** errs);
+--
+foreign import ccall unsafe "rocksdb\\c.h rocksdb_multi_get"
+    rocksdb_multi_get
+        :: C.RocksDBPtr
+        -> C.ReadOptionsPtr
+        -> CSize
+            -- ^ num_key
+        -> Ptr (Ptr CChar)
+            -- ^ keys_list
+        -> Ptr CSize
+            -- ^ keys_list_sizes
+        -> Ptr (Ptr CChar)
+            -- ^ values_list
+        -> Ptr CSize
+            -- ^ values_list_sizes
+        -> Ptr CString
+            -- ^ errs
+        -> IO ()
+
