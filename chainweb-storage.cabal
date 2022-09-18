@@ -41,7 +41,9 @@ library
         Data.CAS.HashMap
         Data.CAS.RocksDB
         Data.DedupStore
+        Chainweb.CacheVar
     build-depends:
+        , async >=2.2
         , base >=4.10 && <4.16
         , bytestring >=0.10
         , containers >=0.5
@@ -58,6 +60,7 @@ library
         , streaming >=0.2
         , temporary >=1.3
         , text >=1.2
+        , time >=1.9
         , transformers >=0.5
         , unordered-containers >=0.2
         , vector >=0.12
