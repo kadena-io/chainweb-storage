@@ -1,7 +1,7 @@
 {-# language NumericUnderscores #-}
 {-# language LambdaCase #-}
 
-module Chainweb.CacheVar where
+module Chainweb.Storage.CacheVar where
 
 import Control.Concurrent(threadDelay)
 import Control.Concurrent.Async
