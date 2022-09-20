@@ -1,4 +1,4 @@
-cabal-version: 2.2
+cabal-version: 3.0
 name: chainweb-storage
 version: 0.1.0.0
 synopsis: Key Value Storage for Chainweb
@@ -20,6 +20,8 @@ tested-with:
 extra-source-files:
     README.md
     CHANGELOG.md
+    AUTHORS
+    rocksdb/rocksdb-6.29.3/**/*.h
 
 source-repository head
     type: git
@@ -27,8 +29,6 @@ source-repository head
 
 library
     hs-source-dirs: src
-    cxx-sources: cpp/chainweb-rocksdb.cpp
-    includes: cpp/chainweb-rocksdb.h
     install-includes: cpp/chainweb-rocksdb.h
     default-language: Haskell2010
     ghc-options:
@@ -64,26 +64,426 @@ library chainweb-storage-rocksdb
     cxx-sources: rocksdb/cpp/chainweb-rocksdb.cpp
     includes: rocksdb/cpp/chainweb-rocksdb.h
     install-includes: rocksdb/cpp/chainweb-rocksdb.h
+
+    include-dirs:
+        rocksdb/rocksdb-6.29.3
+        rocksdb/rocksdb-6.29.3/include
+
+    -- All of the following libraries are optional. If one of the libraries
+    -- is not available on the build host, it can be commented out in the
+    -- list below.
+    --
+    extra-libraries:
+        snappy
+        gflags
+        z
+        bz2
+        lz4
+        zstd
+        tbb
+        stdc++
+
+    -- These options are extracted from CXXFLAGS the RocksDB Makefile
+    cxx-options:
+        -fno-rtti
+        -g
+        -W
+        -Wextra
+        -Wall
+        -Wsign-compare
+        -Wshadow
+        -Wunused-parameter
+        -Werror
+        -std=c++17
+        -faligned-new
+        -DHAVE_ALIGNED_NEW
+        -DROCKSDB_PLATFORM_POSIX
+        -DROCKSDB_LIB_IO_POSIX
+        -DSNAPPY
+        -DGFLAGS=1
+        -DZLIB
+        -DBZIP2
+        -DLZ4
+        -DZSTD
+        -DTBB
+        -DROCKSDB_BACKTRACE
+        -march=native
+        -DHAVE_SSE42
+        -DHAVE_PCLMUL
+        -DHAVE_BMI
+        -DHAVE_LZCNT
+        -DHAVE_UINT128_EXTENSION
+        -DROCKSDB_SUPPORT_THREAD_LOCAL
+        -fno-omit-frame-pointer
+        -momit-leaf-frame-pointer
+        -DNDEBUG
+        -Woverloaded-virtual
+        -Wnon-virtual-dtor
+        -Wno-missing-field-initializers
+        -- -O2
+
+    if os(linux)
+        cxx-options:
+            -DOS_LINUX
+            -fno-builtin-memcmp
+            -DROCKSDB_FALLOCATE_PRESENT
+            -DROCKSDB_MALLOC_USABLE_SIZE
+            -DROCKSDB_PTHREAD_ADAPTIVE_MUTEX
+            -DROCKSDB_RANGESYNC_PRESENT
+            -DROCKSDB_SCHED_GETCPU_PRESENT
+            -DROCKSDB_AUXV_GETAUXVAL_PRESENT
+
+    if os(darwin)
+        cxx-options:
+            -DOS_MACOSX
+            -Wshorten-64-to-32
+            -DHAVE_FULLFSYNC
+
+    -- These sources are extracted from LIB_OBJECTS the RocksDB Makefile
+    cxx-sources:
+        rocksdb/rocksdb-6.29.3/cache/cache.cc
+        rocksdb/rocksdb-6.29.3/cache/cache_entry_roles.cc
+        rocksdb/rocksdb-6.29.3/cache/cache_key.cc
+        rocksdb/rocksdb-6.29.3/cache/cache_reservation_manager.cc
+        rocksdb/rocksdb-6.29.3/cache/clock_cache.cc
+        rocksdb/rocksdb-6.29.3/cache/lru_cache.cc
+        rocksdb/rocksdb-6.29.3/cache/sharded_cache.cc
+        rocksdb/rocksdb-6.29.3/db/arena_wrapped_db_iter.cc
+        rocksdb/rocksdb-6.29.3/db/blob/blob_fetcher.cc
+        rocksdb/rocksdb-6.29.3/db/blob/blob_file_addition.cc
+        rocksdb/rocksdb-6.29.3/db/blob/blob_file_builder.cc
+        rocksdb/rocksdb-6.29.3/db/blob/blob_file_cache.cc
+        rocksdb/rocksdb-6.29.3/db/blob/blob_file_garbage.cc
+        rocksdb/rocksdb-6.29.3/db/blob/blob_file_meta.cc
+        rocksdb/rocksdb-6.29.3/db/blob/blob_file_reader.cc
+        rocksdb/rocksdb-6.29.3/db/blob/blob_garbage_meter.cc
+        rocksdb/rocksdb-6.29.3/db/blob/blob_log_format.cc
+        rocksdb/rocksdb-6.29.3/db/blob/blob_log_sequential_reader.cc
+        rocksdb/rocksdb-6.29.3/db/blob/blob_log_writer.cc
+        rocksdb/rocksdb-6.29.3/db/blob/prefetch_buffer_collection.cc
+        rocksdb/rocksdb-6.29.3/db/builder.cc
+        rocksdb/rocksdb-6.29.3/db/c.cc
+        rocksdb/rocksdb-6.29.3/db/column_family.cc
+        rocksdb/rocksdb-6.29.3/db/compaction/compaction.cc
+        rocksdb/rocksdb-6.29.3/db/compaction/compaction_iterator.cc
+        rocksdb/rocksdb-6.29.3/db/compaction/compaction_job.cc
+        rocksdb/rocksdb-6.29.3/db/compaction/compaction_picker.cc
+        rocksdb/rocksdb-6.29.3/db/compaction/compaction_picker_fifo.cc
+        rocksdb/rocksdb-6.29.3/db/compaction/compaction_picker_level.cc
+        rocksdb/rocksdb-6.29.3/db/compaction/compaction_picker_universal.cc
+        rocksdb/rocksdb-6.29.3/db/compaction/sst_partitioner.cc
+        rocksdb/rocksdb-6.29.3/db/convenience.cc
+        rocksdb/rocksdb-6.29.3/db/db_filesnapshot.cc
+        rocksdb/rocksdb-6.29.3/db/db_impl/compacted_db_impl.cc
+        rocksdb/rocksdb-6.29.3/db/db_impl/db_impl.cc
+        rocksdb/rocksdb-6.29.3/db/db_impl/db_impl_compaction_flush.cc
+        rocksdb/rocksdb-6.29.3/db/db_impl/db_impl_experimental.cc
+        rocksdb/rocksdb-6.29.3/db/db_impl/db_impl_files.cc
+        rocksdb/rocksdb-6.29.3/db/db_impl/db_impl_open.cc
+        rocksdb/rocksdb-6.29.3/db/db_impl/db_impl_readonly.cc
+        rocksdb/rocksdb-6.29.3/db/db_impl/db_impl_secondary.cc
+        rocksdb/rocksdb-6.29.3/db/db_impl/db_impl_write.cc
+        rocksdb/rocksdb-6.29.3/db/db_info_dumper.cc
+        rocksdb/rocksdb-6.29.3/db/db_iter.cc
+        rocksdb/rocksdb-6.29.3/db/dbformat.cc
+        rocksdb/rocksdb-6.29.3/db/error_handler.cc
+        rocksdb/rocksdb-6.29.3/db/event_helpers.cc
+        rocksdb/rocksdb-6.29.3/db/experimental.cc
+        rocksdb/rocksdb-6.29.3/db/external_sst_file_ingestion_job.cc
+        rocksdb/rocksdb-6.29.3/db/file_indexer.cc
+        rocksdb/rocksdb-6.29.3/db/flush_job.cc
+        rocksdb/rocksdb-6.29.3/db/flush_scheduler.cc
+        rocksdb/rocksdb-6.29.3/db/forward_iterator.cc
+        rocksdb/rocksdb-6.29.3/db/import_column_family_job.cc
+        rocksdb/rocksdb-6.29.3/db/internal_stats.cc
+        rocksdb/rocksdb-6.29.3/db/logs_with_prep_tracker.cc
+        rocksdb/rocksdb-6.29.3/db/log_reader.cc
+        rocksdb/rocksdb-6.29.3/db/log_writer.cc
+        rocksdb/rocksdb-6.29.3/db/malloc_stats.cc
+        rocksdb/rocksdb-6.29.3/db/memtable.cc
+        rocksdb/rocksdb-6.29.3/db/memtable_list.cc
+        rocksdb/rocksdb-6.29.3/db/merge_helper.cc
+        rocksdb/rocksdb-6.29.3/db/merge_operator.cc
+        rocksdb/rocksdb-6.29.3/db/output_validator.cc
+        rocksdb/rocksdb-6.29.3/db/periodic_work_scheduler.cc
+        rocksdb/rocksdb-6.29.3/db/range_del_aggregator.cc
+        rocksdb/rocksdb-6.29.3/db/range_tombstone_fragmenter.cc
+        rocksdb/rocksdb-6.29.3/db/repair.cc
+        rocksdb/rocksdb-6.29.3/db/snapshot_impl.cc
+        rocksdb/rocksdb-6.29.3/db/table_cache.cc
+        rocksdb/rocksdb-6.29.3/db/table_properties_collector.cc
+        rocksdb/rocksdb-6.29.3/db/transaction_log_impl.cc
+        rocksdb/rocksdb-6.29.3/db/trim_history_scheduler.cc
+        rocksdb/rocksdb-6.29.3/db/version_builder.cc
+        rocksdb/rocksdb-6.29.3/db/version_edit.cc
+        rocksdb/rocksdb-6.29.3/db/version_edit_handler.cc
+        rocksdb/rocksdb-6.29.3/db/version_set.cc
+        rocksdb/rocksdb-6.29.3/db/wal_edit.cc
+        rocksdb/rocksdb-6.29.3/db/wal_manager.cc
+        rocksdb/rocksdb-6.29.3/db/write_batch.cc
+        rocksdb/rocksdb-6.29.3/db/write_batch_base.cc
+        rocksdb/rocksdb-6.29.3/db/write_controller.cc
+        rocksdb/rocksdb-6.29.3/db/write_thread.cc
+        rocksdb/rocksdb-6.29.3/env/composite_env.cc
+        rocksdb/rocksdb-6.29.3/env/env.cc
+        rocksdb/rocksdb-6.29.3/env/env_chroot.cc
+        rocksdb/rocksdb-6.29.3/env/env_encryption.cc
+        rocksdb/rocksdb-6.29.3/env/env_hdfs.cc
+        rocksdb/rocksdb-6.29.3/env/env_posix.cc
+        rocksdb/rocksdb-6.29.3/env/file_system.cc
+        rocksdb/rocksdb-6.29.3/env/fs_posix.cc
+        rocksdb/rocksdb-6.29.3/env/fs_remap.cc
+        rocksdb/rocksdb-6.29.3/env/file_system_tracer.cc
+        rocksdb/rocksdb-6.29.3/env/io_posix.cc
+        rocksdb/rocksdb-6.29.3/env/mock_env.cc
+        rocksdb/rocksdb-6.29.3/env/unique_id_gen.cc
+        rocksdb/rocksdb-6.29.3/file/delete_scheduler.cc
+        rocksdb/rocksdb-6.29.3/file/file_prefetch_buffer.cc
+        rocksdb/rocksdb-6.29.3/file/file_util.cc
+        rocksdb/rocksdb-6.29.3/file/filename.cc
+        rocksdb/rocksdb-6.29.3/file/line_file_reader.cc
+        rocksdb/rocksdb-6.29.3/file/random_access_file_reader.cc
+        rocksdb/rocksdb-6.29.3/file/read_write_util.cc
+        rocksdb/rocksdb-6.29.3/file/readahead_raf.cc
+        rocksdb/rocksdb-6.29.3/file/sequence_file_reader.cc
+        rocksdb/rocksdb-6.29.3/file/sst_file_manager_impl.cc
+        rocksdb/rocksdb-6.29.3/file/writable_file_writer.cc
+        rocksdb/rocksdb-6.29.3/logging/auto_roll_logger.cc
+        rocksdb/rocksdb-6.29.3/logging/event_logger.cc
+        rocksdb/rocksdb-6.29.3/logging/log_buffer.cc
+        rocksdb/rocksdb-6.29.3/memory/arena.cc
+        rocksdb/rocksdb-6.29.3/memory/concurrent_arena.cc
+        rocksdb/rocksdb-6.29.3/memory/jemalloc_nodump_allocator.cc
+        rocksdb/rocksdb-6.29.3/memory/memkind_kmem_allocator.cc
+        rocksdb/rocksdb-6.29.3/memory/memory_allocator.cc
+        rocksdb/rocksdb-6.29.3/memtable/alloc_tracker.cc
+        rocksdb/rocksdb-6.29.3/memtable/hash_linklist_rep.cc
+        rocksdb/rocksdb-6.29.3/memtable/hash_skiplist_rep.cc
+        rocksdb/rocksdb-6.29.3/memtable/skiplistrep.cc
+        rocksdb/rocksdb-6.29.3/memtable/vectorrep.cc
+        rocksdb/rocksdb-6.29.3/memtable/write_buffer_manager.cc
+        rocksdb/rocksdb-6.29.3/monitoring/histogram.cc
+        rocksdb/rocksdb-6.29.3/monitoring/histogram_windowing.cc
+        rocksdb/rocksdb-6.29.3/monitoring/in_memory_stats_history.cc
+        rocksdb/rocksdb-6.29.3/monitoring/instrumented_mutex.cc
+        rocksdb/rocksdb-6.29.3/monitoring/iostats_context.cc
+        rocksdb/rocksdb-6.29.3/monitoring/perf_context.cc
+        rocksdb/rocksdb-6.29.3/monitoring/perf_level.cc
+        rocksdb/rocksdb-6.29.3/monitoring/persistent_stats_history.cc
+        rocksdb/rocksdb-6.29.3/monitoring/statistics.cc
+        rocksdb/rocksdb-6.29.3/monitoring/thread_status_impl.cc
+        rocksdb/rocksdb-6.29.3/monitoring/thread_status_updater.cc
+        rocksdb/rocksdb-6.29.3/monitoring/thread_status_updater_debug.cc
+        rocksdb/rocksdb-6.29.3/monitoring/thread_status_util.cc
+        rocksdb/rocksdb-6.29.3/monitoring/thread_status_util_debug.cc
+        rocksdb/rocksdb-6.29.3/options/cf_options.cc
+        rocksdb/rocksdb-6.29.3/options/configurable.cc
+        rocksdb/rocksdb-6.29.3/options/customizable.cc
+        rocksdb/rocksdb-6.29.3/options/db_options.cc
+        rocksdb/rocksdb-6.29.3/options/options.cc
+        rocksdb/rocksdb-6.29.3/options/options_helper.cc
+        rocksdb/rocksdb-6.29.3/options/options_parser.cc
+        rocksdb/rocksdb-6.29.3/port/port_posix.cc
+        rocksdb/rocksdb-6.29.3/port/stack_trace.cc
+        rocksdb/rocksdb-6.29.3/table/adaptive/adaptive_table_factory.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/binary_search_index_reader.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/block.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/block_based_filter_block.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/block_based_table_builder.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/block_based_table_factory.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/block_based_table_iterator.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/block_based_table_reader.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/block_builder.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/block_prefetcher.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/block_prefix_index.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/data_block_hash_index.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/data_block_footer.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/filter_block_reader_common.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/filter_policy.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/flush_block_policy.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/full_filter_block.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/hash_index_reader.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/index_builder.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/index_reader_common.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/parsed_full_filter_block.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/partitioned_filter_block.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/partitioned_index_iterator.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/partitioned_index_reader.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/reader_common.cc
+        rocksdb/rocksdb-6.29.3/table/block_based/uncompression_dict_reader.cc
+        rocksdb/rocksdb-6.29.3/table/block_fetcher.cc
+        rocksdb/rocksdb-6.29.3/table/cuckoo/cuckoo_table_builder.cc
+        rocksdb/rocksdb-6.29.3/table/cuckoo/cuckoo_table_factory.cc
+        rocksdb/rocksdb-6.29.3/table/cuckoo/cuckoo_table_reader.cc
+        rocksdb/rocksdb-6.29.3/table/format.cc
+        rocksdb/rocksdb-6.29.3/table/get_context.cc
+        rocksdb/rocksdb-6.29.3/table/iterator.cc
+        rocksdb/rocksdb-6.29.3/table/merging_iterator.cc
+        rocksdb/rocksdb-6.29.3/table/meta_blocks.cc
+        rocksdb/rocksdb-6.29.3/table/persistent_cache_helper.cc
+        rocksdb/rocksdb-6.29.3/table/plain/plain_table_bloom.cc
+        rocksdb/rocksdb-6.29.3/table/plain/plain_table_builder.cc
+        rocksdb/rocksdb-6.29.3/table/plain/plain_table_factory.cc
+        rocksdb/rocksdb-6.29.3/table/plain/plain_table_index.cc
+        rocksdb/rocksdb-6.29.3/table/plain/plain_table_key_coding.cc
+        rocksdb/rocksdb-6.29.3/table/plain/plain_table_reader.cc
+        rocksdb/rocksdb-6.29.3/table/sst_file_dumper.cc
+        rocksdb/rocksdb-6.29.3/table/sst_file_reader.cc
+        rocksdb/rocksdb-6.29.3/table/sst_file_writer.cc
+        rocksdb/rocksdb-6.29.3/table/table_factory.cc
+        rocksdb/rocksdb-6.29.3/table/table_properties.cc
+        rocksdb/rocksdb-6.29.3/table/two_level_iterator.cc
+        rocksdb/rocksdb-6.29.3/table/unique_id.cc
+        rocksdb/rocksdb-6.29.3/test_util/sync_point.cc
+        rocksdb/rocksdb-6.29.3/test_util/sync_point_impl.cc
+        rocksdb/rocksdb-6.29.3/test_util/transaction_test_util.cc
+        rocksdb/rocksdb-6.29.3/tools/dump/db_dump_tool.cc
+        rocksdb/rocksdb-6.29.3/trace_replay/trace_record_handler.cc
+        rocksdb/rocksdb-6.29.3/trace_replay/trace_record_result.cc
+        rocksdb/rocksdb-6.29.3/trace_replay/trace_record.cc
+        rocksdb/rocksdb-6.29.3/trace_replay/trace_replay.cc
+        rocksdb/rocksdb-6.29.3/trace_replay/block_cache_tracer.cc
+        rocksdb/rocksdb-6.29.3/trace_replay/io_tracer.cc
+        rocksdb/rocksdb-6.29.3/util/build_version.cc
+        rocksdb/rocksdb-6.29.3/util/coding.cc
+        rocksdb/rocksdb-6.29.3/util/compaction_job_stats_impl.cc
+        rocksdb/rocksdb-6.29.3/util/comparator.cc
+        rocksdb/rocksdb-6.29.3/util/compression_context_cache.cc
+        rocksdb/rocksdb-6.29.3/util/concurrent_task_limiter_impl.cc
+        rocksdb/rocksdb-6.29.3/util/crc32c.cc
+        rocksdb/rocksdb-6.29.3/util/dynamic_bloom.cc
+        rocksdb/rocksdb-6.29.3/util/hash.cc
+        rocksdb/rocksdb-6.29.3/util/murmurhash.cc
+        rocksdb/rocksdb-6.29.3/util/random.cc
+        rocksdb/rocksdb-6.29.3/util/rate_limiter.cc
+        rocksdb/rocksdb-6.29.3/util/ribbon_config.cc
+        rocksdb/rocksdb-6.29.3/util/regex.cc
+        rocksdb/rocksdb-6.29.3/util/slice.cc
+        rocksdb/rocksdb-6.29.3/util/file_checksum_helper.cc
+        rocksdb/rocksdb-6.29.3/util/status.cc
+        rocksdb/rocksdb-6.29.3/util/string_util.cc
+        rocksdb/rocksdb-6.29.3/util/thread_local.cc
+        rocksdb/rocksdb-6.29.3/util/threadpool_imp.cc
+        rocksdb/rocksdb-6.29.3/util/xxhash.cc
+        rocksdb/rocksdb-6.29.3/utilities/backupable/backupable_db.cc
+        rocksdb/rocksdb-6.29.3/utilities/blob_db/blob_compaction_filter.cc
+        rocksdb/rocksdb-6.29.3/utilities/blob_db/blob_db.cc
+        rocksdb/rocksdb-6.29.3/utilities/blob_db/blob_db_impl.cc
+        rocksdb/rocksdb-6.29.3/utilities/blob_db/blob_db_impl_filesnapshot.cc
+        rocksdb/rocksdb-6.29.3/utilities/blob_db/blob_file.cc
+        rocksdb/rocksdb-6.29.3/utilities/cache_dump_load.cc
+        rocksdb/rocksdb-6.29.3/utilities/cache_dump_load_impl.cc
+        rocksdb/rocksdb-6.29.3/utilities/cassandra/cassandra_compaction_filter.cc
+        rocksdb/rocksdb-6.29.3/utilities/cassandra/format.cc
+        rocksdb/rocksdb-6.29.3/utilities/cassandra/merge_operator.cc
+        rocksdb/rocksdb-6.29.3/utilities/checkpoint/checkpoint_impl.cc
+        rocksdb/rocksdb-6.29.3/utilities/compaction_filters.cc
+        rocksdb/rocksdb-6.29.3/utilities/compaction_filters/remove_emptyvalue_compactionfilter.cc
+        rocksdb/rocksdb-6.29.3/utilities/convenience/info_log_finder.cc
+        rocksdb/rocksdb-6.29.3/utilities/debug.cc
+        rocksdb/rocksdb-6.29.3/utilities/env_mirror.cc
+        rocksdb/rocksdb-6.29.3/utilities/env_timed.cc
+        rocksdb/rocksdb-6.29.3/utilities/fault_injection_env.cc
+        rocksdb/rocksdb-6.29.3/utilities/fault_injection_fs.cc
+        rocksdb/rocksdb-6.29.3/utilities/fault_injection_secondary_cache.cc
+        rocksdb/rocksdb-6.29.3/utilities/leveldb_options/leveldb_options.cc
+        rocksdb/rocksdb-6.29.3/utilities/memory/memory_util.cc
+        rocksdb/rocksdb-6.29.3/utilities/merge_operators.cc
+        rocksdb/rocksdb-6.29.3/utilities/merge_operators/max.cc
+        rocksdb/rocksdb-6.29.3/utilities/merge_operators/put.cc
+        rocksdb/rocksdb-6.29.3/utilities/merge_operators/sortlist.cc
+        rocksdb/rocksdb-6.29.3/utilities/merge_operators/string_append/stringappend.cc
+        rocksdb/rocksdb-6.29.3/utilities/merge_operators/string_append/stringappend2.cc
+        rocksdb/rocksdb-6.29.3/utilities/merge_operators/uint64add.cc
+        rocksdb/rocksdb-6.29.3/utilities/merge_operators/bytesxor.cc
+        rocksdb/rocksdb-6.29.3/utilities/object_registry.cc
+        rocksdb/rocksdb-6.29.3/utilities/option_change_migration/option_change_migration.cc
+        rocksdb/rocksdb-6.29.3/utilities/options/options_util.cc
+        rocksdb/rocksdb-6.29.3/utilities/persistent_cache/block_cache_tier.cc
+        rocksdb/rocksdb-6.29.3/utilities/persistent_cache/block_cache_tier_file.cc
+        rocksdb/rocksdb-6.29.3/utilities/persistent_cache/block_cache_tier_metadata.cc
+        rocksdb/rocksdb-6.29.3/utilities/persistent_cache/persistent_cache_tier.cc
+        rocksdb/rocksdb-6.29.3/utilities/persistent_cache/volatile_tier_impl.cc
+        rocksdb/rocksdb-6.29.3/utilities/simulator_cache/cache_simulator.cc
+        rocksdb/rocksdb-6.29.3/utilities/simulator_cache/sim_cache.cc
+        rocksdb/rocksdb-6.29.3/utilities/table_properties_collectors/compact_on_deletion_collector.cc
+        rocksdb/rocksdb-6.29.3/utilities/trace/file_trace_reader_writer.cc
+        rocksdb/rocksdb-6.29.3/utilities/trace/replayer_impl.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/lock_manager.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/point/point_lock_tracker.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/point/point_lock_manager.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/optimistic_transaction.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/optimistic_transaction_db_impl.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/pessimistic_transaction.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/pessimistic_transaction_db.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/snapshot_checker.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/transaction_base.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/transaction_db_mutex_impl.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/transaction_util.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/write_prepared_txn.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/write_prepared_txn_db.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/write_unprepared_txn.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/write_unprepared_txn_db.cc
+        rocksdb/rocksdb-6.29.3/utilities/ttl/db_ttl_impl.cc
+        rocksdb/rocksdb-6.29.3/utilities/wal_filter.cc
+        rocksdb/rocksdb-6.29.3/utilities/write_batch_with_index/write_batch_with_index.cc
+        rocksdb/rocksdb-6.29.3/utilities/write_batch_with_index/write_batch_with_index_internal.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/locktree/concurrent_tree.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/locktree/keyrange.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/locktree/lock_request.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/locktree/locktree.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/locktree/manager.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/locktree/range_buffer.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/locktree/treenode.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/locktree/txnid_set.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/locktree/wfg.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/standalone_port.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/util/dbt.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/lib/util/memarena.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/range_tree_lock_manager.cc
+        rocksdb/rocksdb-6.29.3/utilities/transactions/lock/range/range_tree/range_tree_lock_tracker.cc
+
+    if os(windows)
+        cxx-sources:
+            rocksdb/rocksdb-6.29.3/port/win/env_default.cc
+            rocksdb/rocksdb-6.29.3/port/win/env_win.cc
+            rocksdb/rocksdb-6.29.3/port/win/io_win.cc
+            rocksdb/rocksdb-6.29.3/port/win/port_win.cc
+            rocksdb/rocksdb-6.29.3/port/win/win_logger.cc
+            rocksdb/rocksdb-6.29.3/port/win/win_thread.cc
+
     extra-libraries: stdc++
     cxx-options: -std=c++11
     default-language: Haskell2010
     ghc-options:
         -Wall
     exposed-modules:
+        Chainweb.Storage.RocksDB
         Data.CAS
         Data.CAS.Forgetful
         Data.CAS.HashMap
         -- Data.CAS.RocksDB
         Data.DedupStore
+        Database.RocksDB
+        Database.RocksDB.Base
+        Database.RocksDB.C
+        Database.RocksDB.Internal
+        Database.RocksDB.Iterator
+        Database.RocksDB.ReadOptions
+        Database.RocksDB.Types
     build-depends:
+        , chainweb-storage
         , async >=2.2
         , base >=4.10 && <4.16
+        , binary
         , bytestring >=0.10
         , containers >=0.5
         , cryptonite >= 0.25
+        , data-default
         , directory >=1.3
         , deepseq >=1.4
         , exceptions >=0.10
+        , filepath
         , hashable >=1.2
         , lens >=4.16
         , memory >=0.14
@@ -97,6 +497,11 @@ library chainweb-storage-rocksdb
         , transformers >=0.5
         , unordered-containers >=0.2
         , vector >=0.12
+    other-extensions:
+        CPP,
+        ForeignFunctionInterface,
+        EmptyDataDecls,
+        RecordWildCards
 
 test-suite rocksdb-tests
     type: exitcode-stdio-1.0

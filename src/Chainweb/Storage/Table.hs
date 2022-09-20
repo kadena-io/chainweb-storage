@@ -1,84 +1,75 @@
 {-# language TypeFamilies #-}
 {-# language RankNTypes #-}
+{-# language FunctionalDependencies #-}
 
 module Chainweb.Storage.Table
     ( Table(..)
     , HasKey(..)
-    , CasTable(..)
     , casWrite
-    , casRead
+    , casMultiWrite
     , Iterator(..)
     , withIter
     , iterKeys
     , iterValues
     , iterEntries
     , Entry(..)
-    , StorageEngine(..)
     )
     where
 
 import Control.Exception
-import Data.ByteString(ByteString)
 import System.IO.Unsafe(unsafeInterleaveIO)
 
-newtype StorageEngine c
-    = StorageEngine
-    { newTable :: forall k v. ByteString -> c k v -> Table k v
-    }
-
-data Table k v
-    = Table
-    { scrounge :: (k -> IO (Maybe v))
-    , shove :: (k -> v -> IO ())
-    , createIter :: IO (Iterator k v)
+class Iterator i => Table t i | t -> i where
+    singleRead :: k -> t k v -> IO (Maybe v)
+    multiRead :: [k] -> t k v -> IO [Maybe v]
+    singleWrite :: k -> v -> t k v -> IO ()
+    multiWrite :: [(k, v)] -> t k v -> IO ()
+    singleDelete :: k -> t k v -> IO ()
+    multiDelete :: [k] -> t k v -> IO ()
+    createIter :: t k v -> IO (i k v)
     -- ^ must be positioned at the start of the table
     -- must also refer to a "version" of the table, ignoring concurrent writes
-    , destroyIter :: Iterator k v -> IO ()
-    }
 
-withIter :: Table k v -> (Iterator k v -> IO a) -> IO a
-withIter t = bracket (createIter t) (destroyIter t)
+withIter :: Table t i => t k v -> (i k v -> IO a) -> IO a
+withIter t = bracket (createIter t) destroyIter
 
 data Entry k v = Entry !k !v
 
-data Iterator k v
-    = Iterator
-    { valid :: IO Bool
-    , next :: IO ()
-    , prev :: IO ()
-    , start :: IO ()
-    , end :: IO ()
-    , entryHere :: IO (Entry k v)
-    , keyHere :: IO k
-    , valueHere :: IO v
-    }
+class Iterator i where
+    iterValid :: i k v -> IO Bool
+    iterNext :: i k v -> IO ()
+    iterPrev :: i k v -> IO ()
+    iterFirst :: i k v -> IO ()
+    iterLast :: i k v -> IO ()
+    iterSeek :: i k v -> k -> IO ()
+    iterEntry :: i k v -> IO (Entry k v)
+    iterKey :: i k v -> IO k
+    iterValue :: i k v -> IO v
+    destroyIter :: i k v -> IO ()
 
-class HasKey v where
-    type Key v
-    getKey :: v -> Key v
+class HasKey v k | v -> k where
+    getKey :: v -> k
 
-newtype CasTable v = CasTable { getCasTable :: Table (Key v) v }
+casWrite :: (HasKey v k, Table t i) => v -> t k v -> IO ()
+casWrite v t = singleWrite (getKey v) v t
 
-casWrite :: HasKey v => CasTable v -> v -> IO ()
-casWrite (CasTable t) v = shove t (getKey v) v
+casMultiWrite :: (HasKey v k, Table t i) => [v] -> t k v -> IO ()
+casMultiWrite vs t = multiWrite [ (getKey v, v) | v <- vs ] t
 
-casRead :: CasTable v -> Key v -> IO (Maybe v)
-casRead (CasTable t) k = scrounge t k
-
-iterParts :: Iterator k v -> IO a -> IO [a]
+iterParts :: Iterator i => i k v -> IO a -> IO [a]
 iterParts it acc = go
     where
     go = unsafeInterleaveIO $ do
-        v <- valid it
+        v <- iterValid it
         if v
         then (:) <$> acc <*> go
         else return []
 
-iterEntries :: Iterator k v -> IO [Entry k v]
-iterEntries it = iterParts it (entryHere it)
+iterEntries :: Iterator i => i k v -> IO [Entry k v]
+iterEntries it = iterParts it (iterEntry it)
 
-iterKeys :: Iterator k v -> IO [k]
-iterKeys it = iterParts it (keyHere it)
+iterKeys :: Iterator i => i k v -> IO [k]
+iterKeys it = iterParts it (iterKey it)
 
-iterValues :: Iterator k v -> IO [v]
-iterValues it = iterParts it (valueHere it)
+iterValues :: Iterator i => i k v -> IO [v]
+iterValues it = iterParts it (iterValue it)
