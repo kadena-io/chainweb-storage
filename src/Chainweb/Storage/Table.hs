@@ -5,13 +5,11 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE QuantifiedConstraints #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -34,6 +32,8 @@ module Chainweb.Storage.Table
   , Table1
   , Casify(..)
   , Cas
+  , casLookup
+  , casMember
   , casInsert
   , casInsertBatch
   , casDelete
@@ -55,7 +55,6 @@ import Control.Exception (Exception, SomeException)
 import Control.Lens
 import Control.Monad.Catch (throwM)
 
-import Data.Coerce
 import Data.Foldable
 import Data.Maybe
 import Data.Text (Text)
@@ -83,14 +82,14 @@ class Eq (CasKeyType v) => IsCasValue v where
 class ReadableTable t k v | t -> k v where
     tableLookup :: t -> k -> IO (Maybe v)
     tableLookupBatch' :: t -> Traversal s r k (Maybe v) -> s -> IO r
-    tableLookupBatch' t l = l (tableLookup t) 
+    tableLookupBatch' t l = l (tableLookup t)
     tableMember :: t -> k -> IO Bool
     tableMember t k = isJust <$> tableLookup t k
 
 tableLookupBatch :: (ReadableTable t k v, Each s t' k (Maybe v)) => t -> s -> IO t'
 tableLookupBatch t = tableLookupBatch' t each
 
-type ReadableCas t v = ReadableTable t (CasKeyType v) v
+type ReadableCas t v = (IsCasValue v, ReadableTable t (CasKeyType v) v)
 type ReadableTable1 t = forall k v. ReadableTable (t k v) k v
 
 class ReadableTable t k v => Table t k v | t -> k v where
@@ -102,26 +101,26 @@ class ReadableTable t k v => Table t k v | t -> k v where
     tableDeleteBatch t ks = traverse_ (tableDelete t) ks
 type Table1 t = forall k v. Table (t k v) k v
 
-type Cas t v = Table t (CasKeyType v) v
+type Cas t v = (IsCasValue v, Table t (CasKeyType v) v)
 
-casInsert :: (IsCasValue v, Cas t v) => t -> v -> IO ()
-casInsert t v = tableInsert t (casKey v) v
+-- casInsert :: (IsCasValue v, Cas t v) => t -> v -> IO ()
+-- casInsert t v = tableInsert t (casKey v) v
 
-casInsertBatch :: (IsCasValue v, Cas t v) => t -> [v] -> IO ()
-casInsertBatch t vs = tableInsertBatch t [(casKey v, v) | v <- vs]
+-- casInsertBatch :: (IsCasValue v, Cas t v) => t -> [v] -> IO ()
+-- casInsertBatch t vs = tableInsertBatch t [(casKey v, v) | v <- vs]
 
-casDelete :: (IsCasValue v, Cas t v) => t -> v -> IO ()
-casDelete t = tableDelete t . casKey
+-- casDelete :: (IsCasValue v, Cas t v) => t -> v -> IO ()
+-- casDelete t = tableDelete t . casKey
 
-casDeleteBatch :: (IsCasValue v, Cas t v) => t -> [v] -> IO ()
-casDeleteBatch t = tableDeleteBatch t . fmap casKey
+-- casDeleteBatch :: (IsCasValue v, Cas t v) => t -> [v] -> IO ()
+-- casDeleteBatch t = tableDeleteBatch t . fmap casKey
 
 class (Table t k v, Iterator i k v) => IterableTable t i k v | t -> i k v where
     -- the created iterator must be positioned at the start of the table.
     withTableIterator :: t -> (i -> IO a) -> IO a
 type IterableTable1 t i = forall k v. IterableTable (t k v) (i k v) k v
 
-type IterableCas t v = IterableTable t (CasKeyType v) v
+type IterableCas t i v = (IsCasValue v, IterableTable t i (CasKeyType v) v)
 
 data Entry k v = Entry !k !v
     deriving (Eq, Show, Ord)
@@ -148,21 +147,25 @@ type CasIterator i v = Iterator i (CasKeyType v) v
 -- type synonym doesn't work in this situation because type synonyms must be
 -- fully applied.
 --
-newtype Casify t v = Casify { unCasify :: t (CasKeyType v) v }
-instance forall t k v. (CasKeyType v ~ k, ReadableTable (t k v) k v) => ReadableTable (Casify t v) k v where
-    tableLookup = coerce @(t k v -> k -> IO (Maybe v)) tableLookup
-    -- can't seem to write `coerce` without the resulting instantiation being impredicative
-    tableLookupBatch' (Casify t) b = tableLookupBatch' t b
-    tableMember = coerce @(t k v -> k -> IO Bool) tableMember
-instance forall t k v. (CasKeyType v ~ k, Table (t k v) k v) => Table (Casify t v) k v where
-    tableInsert = coerce @(t k v -> k -> v -> IO ()) tableInsert
-    tableInsertBatch = coerce @(t k v -> [(k, v)] -> IO ()) tableInsertBatch
-    tableDelete = coerce @(t k v -> k -> IO ()) tableDelete
-    tableDeleteBatch = coerce @(t k v -> [k] -> IO ()) tableDeleteBatch
--- TODO: why is this Iterator superclass needed?
-instance forall t i k v. (CasKeyType v ~ k, IterableTable (t k v) i k v, Iterator i k v) => IterableTable (Casify t v) i k v where
-    withTableIterator :: forall a. Casify t v -> (i -> IO a) -> IO a
-    withTableIterator = coerce @(t k v -> (i -> IO a) -> IO a) withTableIterator
+newtype Casify t = Casify { unCasify :: t }
+
+casLookup :: ReadableCas t v => Casify t -> CasKeyType v -> IO (Maybe v)
+casLookup (Casify t) = tableLookup t
+
+casInsert :: Cas t v => Casify t -> v -> IO ()
+casInsert (Casify t) v = tableInsert t (casKey v) v
+
+casInsertBatch :: Cas t v => Casify t -> [v] -> IO ()
+casInsertBatch (Casify t) vs = tableInsertBatch t [(casKey v, v) | v <- vs]
+
+casDelete :: Cas t v => Casify t -> v -> IO ()
+casDelete (Casify t) = tableDelete t . casKey
+
+casDeleteBatch :: Cas t v => Casify t -> [v] -> IO ()
+casDeleteBatch (Casify t) = tableDeleteBatch t . fmap casKey
+
+casMember :: ReadableCas t v => Casify t -> CasKeyType v -> IO Bool
+casMember (Casify t) = tableMember t
 
 -- | Lookup a value by its key in a content-addressable store and throw an
 -- 'TableException' if the value doesn't exist in the store

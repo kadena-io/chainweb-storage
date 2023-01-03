@@ -112,7 +112,7 @@ instance Exception DedupStoreException
 --
 data DedupStore k v = DedupStore
     { _dedupRoots :: !(RocksDbTable k DedupHash)
-    , _dedupChunks :: !(Casify RocksDbTable Chunk)
+    , _dedupChunks :: !(Casify (RocksDbTable (CasKeyType Chunk) Chunk))
     , _dedupValueCodec :: !(Codec v)
     }
 
@@ -156,7 +156,7 @@ dedupInsert :: DedupStore k v -> k -> v -> IO ()
 dedupInsert store k v = do
     dedupKey <- dedupStore (_dedupChunks store)
         $ BL.fromStrict $ _codecEncode (_dedupValueCodec store) v
-    tableInsert (_dedupRoots store) k dedupKey 
+    tableInsert (_dedupRoots store) k dedupKey
 {-# INLINE dedupInsert #-}
 
 -- | @dedupLookup db k@ returns 'Just' the value at key @k@ in the
@@ -194,8 +194,8 @@ type DedupCas cas = Cas cas Chunk
 --
 dedupStore
     :: HasCallStack
-    => DedupCas cas
-    => cas
+    => DedupCas t
+    => Casify t
     -> BL.ByteString
     -> IO DedupHash
 dedupStore store bytes = third3 <$> dedupStore' store bytes
@@ -210,8 +210,8 @@ dedupStore store bytes = third3 <$> dedupStore' store bytes
 --
 dedupStore'
     :: HasCallStack
-    => DedupCas cas
-    => cas
+    => DedupCas t
+    => Casify t
     -> BL.ByteString
     -> IO (Int, Int, DedupHash)
 dedupStore' store = go0
@@ -246,10 +246,10 @@ dedupStore' store = go0
     hashAndStore :: Word8 -> B.ByteString -> IO (Int, Int, DedupHash)
     hashAndStore tag c = do
         let h = DedupHash $ BA.convert $ C.hash @_ @DedupHashAlg (B.cons tag c)
-        (hit, miss) <- tableMember store h >>= \x -> if x
+        (hit, miss) <- casMember store h >>= \x -> if x
             then return (1, 0)
             else do
-                casInsert store (Chunk tag h c) 
+                casInsert store (Chunk tag h c)
                 return (0, 1)
         return (hit, miss, h)
     {-# INLINE hashAndStore #-}
@@ -271,11 +271,11 @@ dedupStore' store = go0
 -- | Retrieve a sequence of bytes from a deduplicated content addressable store.
 --
 dedupRestore
-    :: DedupCas cas
-    => cas
+    :: DedupCas t
+    => Casify t
     -> DedupHash
     -> IO (Maybe BL.ByteString)
-dedupRestore store key = fmap BB.toLazyByteString <$> do
+dedupRestore (Casify store) key = fmap BB.toLazyByteString <$> do
     tableLookup store key >>= \case
         Nothing -> return Nothing
         Just (Chunk 0x0 _ b) -> return $ Just $ BB.byteString b

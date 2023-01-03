@@ -137,19 +137,19 @@ tableTests db tableName = do
     assertNoThunks t
     assertEmptyTable t
 
-    tableInsert t 1 8 
+    tableInsert t 1 8
     assertEntries t [(1, 8)]
 
-    tableInsert t 2 9 
+    tableInsert t 2 9
     assertEntries t [(1, 8), (2, 9)]
 
-    tableDelete t 1 
+    tableDelete t 1
     assertEntries t [(2, 9)]
 
-    tableInsert t 2 8 
+    tableInsert t 2 8
     assertEntries t [(2, 8)]
 
-    tableDelete t 2 
+    tableDelete t 2
     assertEmptyTable t
   where
     !t = intTable db tableName
@@ -204,40 +204,41 @@ casBatchTests :: HasCallStack => RocksDb -> B8.ByteString -> IO ()
 casBatchTests db tableName = do
     assertEmptyTable t
 
-    tableInsertBatch t mempty 
+    tableInsertBatch t mempty
     assertEmptyTable t
 
-    casInsertBatch t [1] 
-    assertCasEntries t [1]
+    casInsertBatch cas [1]
+    assertCasEntries cas [1]
 
-    casInsertBatch t [2] 
-    assertCasEntries t [1, 2]
+    casInsertBatch cas [2]
+    assertCasEntries cas [1, 2]
 
-    casDeleteBatch t [2] 
-    assertCasEntries t [1]
+    casDeleteBatch cas [2]
+    assertCasEntries cas [1]
 
-    casInsertBatch t [1] 
-    assertCasEntries t [1]
+    casInsertBatch cas [1]
+    assertCasEntries cas [1]
 
-    casInsertBatch t [2, 2, 2] 
-    assertCasEntries t [1, 2]
+    casInsertBatch cas [2, 2, 2]
+    assertCasEntries cas [1, 2]
 
-    casInsertBatch t [1, 2, 3, 4] 
-    assertCasEntries t [1, 2, 3, 4]
+    casInsertBatch cas [1, 2, 3, 4]
+    assertCasEntries cas [1, 2, 3, 4]
 
-    casDeleteBatch t [5] 
-    assertCasEntries t [1, 2, 3, 4]
+    casDeleteBatch cas [5]
+    assertCasEntries cas [1, 2, 3, 4]
 
-    casDeleteBatch t [1, 3, 1] 
-    assertCasEntries t [2, 4]
+    casDeleteBatch cas [1, 3, 1]
+    assertCasEntries cas [2, 4]
 
-    casDeleteBatch t [] 
-    assertCasEntries t [2, 4]
+    casDeleteBatch cas []
+    assertCasEntries cas [2, 4]
 
-    casDeleteBatch t [2, 4] 
+    casDeleteBatch cas [2, 4]
     assertEmptyTable t
   where
     t = intTable db tableName
+    cas = Casify t
 
 casTests :: HasCallStack => RocksDb -> B8.ByteString -> IO ()
 casTests db tableName = do
@@ -245,52 +246,53 @@ casTests db tableName = do
     assertIO (tableMember t 1) False
     assertIO (tableLookup t 1) Nothing
 
-    casInsertBatch t mempty 
+    casInsertBatch cas mempty
     assertEmptyTable t
 
-    casInsert t 1 
-    assertCasEntries t [1]
+    casInsert cas 1
+    assertCasEntries cas [1]
     assertIO (tableMember t (casKey @Int 1)) True
     assertIO (tableLookup t (casKey @Int 1)) (Just 1)
 
-    casInsert t 2 
-    assertCasEntries t [1, 2]
+    casInsert cas 2
+    assertCasEntries cas [1, 2]
     assertIO (tableMember t (casKey @Int 1)) True
     assertIO (tableMember t (casKey @Int 2)) True
     assertIO (tableLookup t (casKey @Int 1)) (Just 1)
     assertIO (tableLookup t (casKey @Int 2)) (Just 2)
     assertIO (tableLookupBatch t [casKey @Int 1, casKey @Int 2]) [Just 1, Just 2]
 
-    casDelete t 2
-    assertCasEntries t [1]
+    casDelete cas 2
+    assertCasEntries cas [1]
     assertIO (tableMember t (casKey @Int 1)) True
     assertIO (tableMember t (casKey @Int 2)) False
     assertIO (tableLookup t (casKey @Int 1)) (Just 1)
     assertIO (tableLookup t (casKey @Int 2)) Nothing
     assertIO (tableLookupBatch t [casKey @Int 1, casKey @Int 2]) [Just 1, Nothing]
 
-    casInsert t 1
-    assertCasEntries t [1]
+    casInsert cas 1
+    assertCasEntries cas [1]
 
-    traverse_ @[] (casInsert t) [2, 2, 2]
-    assertCasEntries t [1, 2]
+    traverse_ @[] (casInsert cas) [2, 2, 2]
+    assertCasEntries cas [1, 2]
 
-    traverse_ @[] (casInsert t) [1, 2, 3, 4]
-    assertCasEntries t [1, 2, 3, 4]
+    traverse_ @[] (casInsert cas) [1, 2, 3, 4]
+    assertCasEntries cas [1, 2, 3, 4]
 
-    casDelete t (casKey @Int 5) 
-    assertCasEntries t [1, 2, 3, 4]
+    casDelete cas (casKey @Int 5)
+    assertCasEntries cas [1, 2, 3, 4]
 
-    traverse_ @[] (casDelete t) [1, 3, 1]
-    assertCasEntries t [2, 4]
+    traverse_ @[] (casDelete cas) [1, 3, 1]
+    assertCasEntries cas [2, 4]
 
-    traverse_ @[] (casDelete t) [2, 4]
+    traverse_ @[] (casDelete cas) [2, 4]
     assertEmptyTable t
   where
     t = intTable db tableName
+    cas = Casify t
 
-assertCasEntries :: HasCallStack => RocksDbTable Int Int -> [Int] -> IO ()
-assertCasEntries t l = do
+assertCasEntries :: HasCallStack => Casify (RocksDbTable Int Int) -> [Int] -> IO ()
+assertCasEntries (Casify t) l = do
     assertNoThunks t
     assertEntries t [(casKey v, v) | v <- l]
 
