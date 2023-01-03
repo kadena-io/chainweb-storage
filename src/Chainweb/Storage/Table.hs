@@ -33,14 +33,20 @@ module Chainweb.Storage.Table
   , Casify(..)
   , Cas
   , casLookup
+  , casLookupBatch'
+  , casLookupBatch
   , casMember
+  , casMemberKey
   , casInsert
   , casInsertBatch
   , casDelete
   , casDeleteBatch
+  , casDeleteKey
+  , casDeleteKeyBatch
   , IterableTable (..)
   , IterableTable1
   , IterableCas
+  , withCasIterator
   , Entry (..)
   , Iterator (..)
   , Iterator1
@@ -152,6 +158,12 @@ newtype Casify t = Casify { unCasify :: t }
 casLookup :: ReadableCas t v => Casify t -> CasKeyType v -> IO (Maybe v)
 casLookup (Casify t) = tableLookup t
 
+casLookupBatch' :: ReadableCas t v => Casify t -> Traversal s r (CasKeyType v) (Maybe v) -> s -> IO r
+casLookupBatch' (Casify t) = tableLookupBatch' t
+
+casLookupBatch :: (ReadableCas t v, Each s t' (CasKeyType v) (Maybe v)) => Casify t -> s -> IO t'
+casLookupBatch (Casify t) = tableLookupBatch' t each
+
 casInsert :: Cas t v => Casify t -> v -> IO ()
 casInsert (Casify t) v = tableInsert t (casKey v) v
 
@@ -164,8 +176,20 @@ casDelete (Casify t) = tableDelete t . casKey
 casDeleteBatch :: Cas t v => Casify t -> [v] -> IO ()
 casDeleteBatch (Casify t) = tableDeleteBatch t . fmap casKey
 
-casMember :: ReadableCas t v => Casify t -> CasKeyType v -> IO Bool
-casMember (Casify t) = tableMember t
+casDeleteKey :: Cas t v => Casify t -> CasKeyType v -> IO ()
+casDeleteKey (Casify t) = tableDelete t
+
+casDeleteKeyBatch :: Cas t v => Casify t -> [CasKeyType v] -> IO ()
+casDeleteKeyBatch (Casify t) = tableDeleteBatch t
+
+casMember :: ReadableCas t v => Casify t -> v -> IO Bool
+casMember (Casify t) = tableMember t . casKey
+
+casMemberKey :: ReadableCas t v => Casify t -> CasKeyType v -> IO Bool
+casMemberKey (Casify t) = tableMember t
+
+withCasIterator :: IterableCas t i v => Casify t -> (i -> IO a) -> IO a
+withCasIterator (Casify t) = withTableIterator t
 
 -- | Lookup a value by its key in a content-addressable store and throw an
 -- 'TableException' if the value doesn't exist in the store
@@ -177,8 +201,8 @@ tableLookupM cas k =
                 "tableLookupM: lookup failed for table key"
         Just v -> return $! v
 
-casLookupM :: (HasCallStack, ReadableCas t v) => t -> CasKeyType v -> IO v
-casLookupM = tableLookupM
+casLookupM :: (HasCallStack, ReadableCas t v) => Casify t -> CasKeyType v -> IO v
+casLookupM (Casify t) = tableLookupM t
 
 -- | Exceptions that are thrown by instances of 'IsCas'.
 data TableException

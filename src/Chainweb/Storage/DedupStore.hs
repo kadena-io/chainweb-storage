@@ -246,7 +246,7 @@ dedupStore' store = go0
     hashAndStore :: Word8 -> B.ByteString -> IO (Int, Int, DedupHash)
     hashAndStore tag c = do
         let h = DedupHash $ BA.convert $ C.hash @_ @DedupHashAlg (B.cons tag c)
-        (hit, miss) <- casMember store h >>= \x -> if x
+        (hit, miss) <- casMemberKey store h >>= \x -> if x
             then return (1, 0)
             else do
                 casInsert store (Chunk tag h c)
