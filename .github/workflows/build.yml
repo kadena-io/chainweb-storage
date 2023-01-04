@@ -17,8 +17,8 @@ jobs:
         ghc: ['8.10.7', '9.0.2', '9.2']
         cabal: ['3.8']
         os:
-        - 'ubuntu-18.04'
         - 'ubuntu-20.04'
+        - 'ubuntu-22.04'
         - 'macOS-latest'
         # - 'windows-latest' # windows builds generally work but are flaky on the github runners
 
