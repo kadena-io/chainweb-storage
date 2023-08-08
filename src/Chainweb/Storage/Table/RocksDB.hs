@@ -453,9 +453,6 @@ instance IterableTable (RocksDbTable k v) (RocksDbTableIter k v) k v where
         readOptions = fold
             [ R.setLowerBound (namespaceFirst $ _rocksDbTableNamespace db)
             , R.setUpperBound (namespaceLast $ _rocksDbTableNamespace db)
-            -- TODO: this setting tells rocksdb to use prefix seek *when it can*.
-            -- the question remains: is it actually being used?
-            , R.setAutoPrefixMode True
             ]
         makeTableIter =
             RocksDbTableIter
