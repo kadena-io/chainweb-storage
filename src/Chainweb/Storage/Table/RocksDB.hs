@@ -65,7 +65,7 @@ module Chainweb.Storage.Table.RocksDB
   , updateBatch
 
   -- * Rocks DB Table Iterator
-  , RocksDbTableIter
+  , RocksDbTableIter(..)
 
   -- ** Streams
   , iterToEntryStream
